@@ -1,1 +1,3 @@
 data.h5ad
+.venv/
+__pycache__/
