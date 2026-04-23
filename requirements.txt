@@ -1,0 +1,8 @@
+scanpy
+anndata
+python-igraph
+louvain
+leidenalg
+scikit-image
+scikit-misc
+harmonypy==0.0.9

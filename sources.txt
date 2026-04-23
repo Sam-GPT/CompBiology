@@ -1,0 +1,14 @@
+Clustering:
+Clustering and classification methods for single-cell RNA-sequencing data: https://academic.oup.com/bib/article/21/4/1196/5528236?login=false&guestAccessKey=
+Single-cell RNA-seq clustering: datasets, models, and algorithms: https://www.tandfonline.com/doi/full/10.1080/15476286.2020.1728961#d1e7646
+scDFC: Deep Fusion Clustering for Single-Cell RNA-seq Data: https://academic.oup.com/bib/article/24/4/bbad216/7190935?login=false&guestAccessKey=
+
+
+Clustering + Batch Effect Correction?:
+Deep learning enables accurate clustering with batch effect removal in single-cell RNA-seq analysis: https://www.nature.com/articles/s41467-020-15851-3#code-availability
+
+
+
+Batch Effect Correction:
+A benchmark of batch-effect correction methods for single-cell RNA sequencing data: https://link.springer.com/article/10.1186/s13059-019-1850-9#Sec13
+Comparison of Scanpy-based algorithms to remove the batch effect from single-cell RNA-seq data: https://link.springer.com/article/10.1186/s13619-020-00041-9
