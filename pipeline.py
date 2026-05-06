@@ -120,3 +120,58 @@ sc.pl.umap(
     # Setting a smaller point size to get prevent overlap
     size=2,
 )
+
+## 3. Clustering (Benchmarking Leiden Resolutions)
+print("Running clustering...")
+
+# Method: Leiden algorithm (The modern standard)
+# We test multiple resolutions to benchmark how it affects the number of clusters (as seen on slide 35)
+
+sc.tl.leiden(adata, resolution=0.25, key_added="leiden_res_0.25")
+sc.tl.leiden(adata, resolution=0.5, key_added="leiden_res_0.50")
+sc.tl.leiden(adata, resolution=1.0, key_added="leiden_res_1.00")
+
+# Visualize the clustering results side-by-side on the UMAP for your benchmark report
+sc.pl.umap(
+    adata,
+    color=["leiden_res_0.25", "leiden_res_0.50", "leiden_res_1.00"],
+    wspace=0.4,
+    title=["Leiden (Res=0.25)", "Leiden (Res=0.50)", "Leiden (Res=1.0)"]
+)
+
+## 4. Cluster Interpretation (Finding meaning in the presence of noise)
+print("Running Differential Gene Expression to find marker genes...")
+
+# Let's proceed with the Leiden algorithm at 0.50 resolution for our interpretation
+chosen_cluster_key = "leiden_res_0.50"
+
+# Rank genes to find cluster-specific marker genes
+# 'wilcoxon' is the standard non-parametric statistical test used for this
+sc.tl.rank_genes_groups(
+    adata,
+    groupby=chosen_cluster_key,
+    method="wilcoxon",
+    use_raw=False
+)
+
+# 4a. Visualize the top 5 marker genes for each cluster using a Dotplot
+# Dotplots are excellent for interpreting clusters (as shown on slide 36)
+# It shows both the mean expression (color) and fraction of cells expressing the gene (dot size)
+sc.pl.rank_genes_groups_dotplot(
+    adata,
+    n_genes=5,
+    groupby=chosen_cluster_key,
+    standard_scale="var", # Scales expression between 0 and 1 for easier visual comparison
+    title="Top 5 Marker Genes per Cluster"
+)
+
+# 4b. Extract the marker genes into a DataFrame to investigate biologically
+# Let's say you want to look at the top markers for Cluster '0'
+cluster_0_markers = sc.get.rank_genes_groups_df(adata, group="0")
+
+print("\n--- Top 10 marker genes for Cluster 0 ---")
+print(cluster_0_markers.head(10))
+
+# Note for your assignment report:
+# Once you have these gene lists, you would typically look them up in biological databases
+# (like CellMarker or literature) to say "Cluster 0 is highly expressing CD14, so it is a Monocyte."
