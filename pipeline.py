@@ -16,15 +16,18 @@ adata = sc.read_h5ad('data.h5ad')
 # Limit to 30K cells
 adata = adata[:30000, :].copy()
 
+
 ## 1. Normalize / Preprocess
 
 # Annotate gene populations
 # mitochondrial genes, "MT-" for human, "Mt-" for mouse
-adata.var["mt"] = adata.var_names.str.startswith("MT-")
+adata.var["mt"] = adata.var["feature_name"].str.upper().str.startswith("MT-")
 # ribosomal genes
-adata.var["ribo"] = adata.var_names.str.startswith(("RPS", "RPL"))
+adata.var["ribo"] = adata.var["feature_name"].str.upper().str.startswith(("RPS", "RPL"))
 # hemoglobin genes
-adata.var["hb"] = adata.var_names.str.contains("^HB[^(P)]")
+adata.var["hb"] = adata.var["feature_name"].str.upper().str.contains("^HB[^(P)]")
+
+
 
 # Calculate QC metrics
 sc.pp.calculate_qc_metrics(adata, qc_vars=["mt", "ribo", "hb"], inplace=True, log1p=True)
@@ -42,15 +45,17 @@ sc.pp.calculate_qc_metrics(adata, qc_vars=["mt", "ribo", "hb"], inplace=True, lo
 # )
 
 # Filter cells
-sc.pp.filter_cells(adata, min_genes=100) # Keeps only cells that express at least 100 genes
+sc.pp.filter_cells(adata, min_genes=200) # Keeps only cells that express at least 200 genes
 sc.pp.filter_genes(adata, min_cells=3) # Keeps only genes that are expressed in at least 3 cells
 
 
 # Doublet Detection
 sc.pp.scrublet(adata, batch_key="batch") # doublet: which are multiple cells captured in one droplet.
-#sc.pl.umap(adata, color=["doublet_score", "predicted_doublet"])
 
-adata = adata[adata.obs["doublet_score"] < 0.25].copy()
+# Visualize doublet scores and predicted doublets 
+# sc.pl.umap(adata, color=["doublet_score", "predicted_doublet"])
+
+adata = adata[adata.obs["doublet_score"] < 0.56].copy()
 
 # Normalization and Feature Selection
 
@@ -69,6 +74,7 @@ sc.pp.highly_variable_genes(
     batch_key="batch",
     subset=False,
     flavor="seurat_v3",
+    layer="counts",
 )
 
 adata = adata[:, adata.var["highly_variable"]].copy()
@@ -81,8 +87,8 @@ adata = adata[:, adata.var["highly_variable"]].copy()
 sc.tl.pca(adata, svd_solver="arpack")
 
 
-
-#sc.pl.pca_variance_ratio(adata, n_pcs=50, log=True)
+# Visualizes how much variance the first 50 PCA dimensions explain (on a log scale)
+# sc.pl.pca_variance_ratio(adata, n_pcs=50, log=True)
 
 
 
@@ -99,10 +105,10 @@ ho = hm.run_harmony(
 adata.obsm["X_pca_harmony"] = ho.Z_corr.T
 
 
-# # Before Harmony Batch correction
+# # Before Harmony Batch correction (Plotting the PCA colored by batch to see the batch effect)
 # sc.pl.pca(adata, color="batch")
 
-# # After Harmony Batch correction
+# # After Harmony Batch correction (Plotting the Harmony-corrected PCA colored by batch to see if the batch effect is reduced)
 # sc.pl.embedding(
 #     adata,
 #     basis="X_pca_harmony",
@@ -113,15 +119,26 @@ adata.obsm["X_pca_harmony"] = ho.Z_corr.T
 sc.pp.neighbors(adata, use_rep="X_pca_harmony")
 sc.tl.umap(adata)
 
+# Visualize the UMAP colored by batch to check if the batch effect has been mitigated
+# sc.pl.umap(
+#     adata,
+#     color="batch",
+#     # Setting a smaller point size to get prevent overlap
+#     size=2,
+# )
 
-sc.pl.umap(
-    adata,
-    color="batch",
-    # Setting a smaller point size to get prevent overlap
-    size=2,
-)
 
-## 3. Clustering (Benchmarking Leiden Resolutions)
+
+
+
+
+
+
+
+
+
+
+## 3. Clustering
 print("Running clustering...")
 
 # Method: Leiden algorithm (The modern standard)
@@ -138,6 +155,20 @@ sc.pl.umap(
     wspace=0.4,
     title=["Leiden (Res=0.25)", "Leiden (Res=0.50)", "Leiden (Res=1.0)"]
 )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ## 4. Cluster Interpretation (Finding meaning in the presence of noise)
 print("Running Differential Gene Expression to find marker genes...")
