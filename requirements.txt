@@ -6,3 +6,4 @@ leidenalg
 scikit-image
 scikit-misc
 harmonypy==0.0.9
+GiniClust3
