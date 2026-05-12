@@ -52,7 +52,7 @@ sc.pp.filter_genes(adata, min_cells=3) # Keeps only genes that are expressed in 
 # Doublet Detection
 sc.pp.scrublet(adata, batch_key="batch") # doublet: which are multiple cells captured in one droplet.
 
-# Visualize doublet scores and predicted doublets 
+# Visualize doublet scores and predicted doublets
 # sc.pl.umap(adata, color=["doublet_score", "predicted_doublet"])
 
 adata = adata[adata.obs["doublet_score"] < 0.56].copy()
@@ -69,13 +69,16 @@ sc.pp.log1p(adata)
 
 # Identify 2,000 highly variable genes (HVGs)
 sc.pp.highly_variable_genes(
-    adata, 
-    n_top_genes=2000, 
+    adata,
+    n_top_genes=2000,
     batch_key="batch",
     subset=False,
     flavor="seurat_v3",
     layer="counts",
 )
+
+# Save the full dataset (with all genes) before subsetting, specifically for GiniClust3
+adata_full = adata.copy()
 
 adata = adata[:, adata.var["highly_variable"]].copy()
 
@@ -211,38 +214,10 @@ print(cluster_0_markers.head(10))
 
 
 ## 5. Benchmarking Alternative Algorithms
-
-
-# ================================================================================
-# ATTEMPT 1: GiniClust3 (Rare Cell Type Detection) - COMMENTED OUT
-# Reason for failure: Academic insight!
-# GiniClust3 is designed to find rare cell types using the Gini Index. However,
-# in Step 1 of our pipeline, we subsetted the data to the top 2,000 Highly
-# Variable Genes (HVGs). This standard preprocessing step inherently removes
-# genes that are rarely expressed. As a result, GiniClust3 returned
-# "0 Gini genes passed the cutoff".
-#
-# Conclusion: You cannot use standard HVG filtering if your goal is rare-cell
-# detection in epilepsy. We keep this code here to prove we tested it.
-# ================================================================================
-# import giniclust3
-# import scipy.sparse
-#
-# adata_gini = adata.copy()
-# adata_gini.X = adata_gini.layers["counts"].copy()
-#
-# if scipy.sparse.issparse(adata_gini.X):
-#     adata_gini.X = adata_gini.X.toarray()
-#
-# giniclust3.gini.calGini(adata_gini)
-# adata_gini = giniclust3.gini.clusterGini(adata_gini)
-# giniclust3.fnn.fnn(adata_gini)
-
+import scipy.sparse
 
 # ================================================================================
-# ATTEMPT 2: K-Means (Distance-based clustering) - ACTIVE BENCHMARK
-# We benchmark K-Means against Leiden to visually prove why Graph-based
-# algorithms are superior for organic single-cell data.
+# ALGORITHM 1: K-Means (Distance-based clustering)
 # ================================================================================
 print("\nRunning K-Means for algorithm benchmark...")
 
@@ -254,11 +229,41 @@ kmeans.fit(adata.obsm['X_pca_harmony'])
 adata.obs['kmeans'] = kmeans.labels_.astype(str)
 adata.obs['kmeans'] = adata.obs['kmeans'].astype('category')
 
-# Plot the benchmark! Leiden vs K-Means side-by-side
+
+# ================================================================================
+# ALGORITHM 2: GiniClust3 (Rare Cell Type Detection)
+# ================================================================================
+print("\nRunning GiniClust3 for rare cell type detection benchmark...")
+
+from giniclust3 import gini
+import scipy.sparse
+
+# Use 'adata_full' (saved before HVG filtering) so rare genes are not lost
+adata_gini = adata_full.copy()
+adata_gini.X = adata_gini.layers["counts"].copy()
+
+# Unpack sparse matrix to dense array for GiniClust3 to avoid length errors
+if scipy.sparse.issparse(adata_gini.X):
+    adata_gini.X = adata_gini.X.toarray()
+
+print("Calculating Gini Index (This might take a minute)...")
+gini.calGini(adata_gini)
+
+
+print("Clustering based on high Gini genes...")
+adata_gini = gini.clusterGini(adata_gini)
+
+adata.obs['giniclust'] = adata_gini.obs['leiden'].values.astype('category')
+
+# ================================================================================
+# FINAL BENCHMARK PLOT
+# ================================================================================
+# Plot the benchmark! Leiden vs K-Means vs GiniClust3 side-by-side
+print("\nPlotting Benchmark Results...")
 sc.pl.umap(
     adata,
-    color=["leiden_res_0.50", "kmeans"],
+    color=["leiden_res_0.50", "kmeans", "giniclust"],
     wspace=0.4,
-    title=["Leiden (Graph-based)", "K-Means (Distance-based)"]
+    title=["Leiden (Graph)", "K-Means (Distance)", "GiniClust3 (Rare Cells)"]
 )
-print("K-Means benchmark complete!")
+print("Benchmark complete!")
