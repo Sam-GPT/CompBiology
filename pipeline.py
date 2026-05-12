@@ -258,12 +258,36 @@ adata.obs['giniclust'] = adata_gini.obs['leiden'].values.astype('category')
 # ================================================================================
 # FINAL BENCHMARK PLOT
 # ================================================================================
-# Plot the benchmark! Leiden vs K-Means vs GiniClust3 side-by-side
-print("\nPlotting Benchmark Results...")
+
+# --- GiniClust3: label zeldzame cellen ---
+# Tel hoeveel cellen per GiniClust3-cluster
+cluster_sizes = adata.obs['giniclust'].value_counts()
+
+# Clusters met minder dan 50 cellen = zeldzaam
+rare_clusters = cluster_sizes[cluster_sizes < 50].index
+
+# Nieuwe kolom: 'Zeldzaam' of 'Gewoon'
+adata.obs['giniclust_rare'] = adata.obs['giniclust'].apply(
+    lambda x: 'Zeldzaam' if x in rare_clusters else 'Gewoon'
+).astype('category')
+
+print(f"Aantal zeldzame cellen: {(adata.obs['giniclust_rare'] == 'Zeldzaam').sum()}")
+print(f"Aantal gewone cellen:   {(adata.obs['giniclust_rare'] == 'Gewoon').sum()}")
+
+# Plot Leiden en K-Means samen
 sc.pl.umap(
     adata,
-    color=["leiden_res_0.50", "kmeans", "giniclust"],
+    color=["leiden_res_0.50", "kmeans"],
     wspace=0.4,
-    title=["Leiden (Graph)", "K-Means (Distance)", "GiniClust3 (Rare Cells)"]
+    title=["Leiden (Graph)", "K-Means (Distance)"]
 )
+
+# Plot GiniClust3 apart (met eigen kleurenpalet)
+sc.pl.umap(
+    adata,
+    color="giniclust_rare",
+    title="GiniClust3: Zeldzame vs. Gewone cellen",
+    palette={'Zeldzaam': 'red', 'Gewoon': 'lightgrey'}
+)
+
 print("Benchmark complete!")
