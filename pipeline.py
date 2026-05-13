@@ -1,10 +1,10 @@
-import giniclust3
 import scanpy as sc
 import pandas as pd
 import matplotlib.pyplot as plt
 import scanpy.external as sce
 import harmonypy as hm
-from sklearn.cluster import KMeans
+
+
 
 sc.settings.verbosity = 3
 sc.settings.set_figure_params(dpi=150, facecolor='white')
@@ -76,9 +76,6 @@ sc.pp.highly_variable_genes(
     flavor="seurat_v3",
     layer="counts",
 )
-
-# Save the full dataset (with all genes) before subsetting, specifically for GiniClust3
-adata_full = adata.copy()
 
 adata = adata[:, adata.var["highly_variable"]].copy()
 
@@ -209,85 +206,3 @@ print(cluster_0_markers.head(10))
 # Note for your assignment report:
 # Once you have these gene lists, you would typically look them up in biological databases
 # (like CellMarker or literature) to say "Cluster 0 is highly expressing CD14, so it is a Monocyte."
-
-
-
-
-## 5. Benchmarking Alternative Algorithms
-import scipy.sparse
-
-# ================================================================================
-# ALGORITHM 1: K-Means (Distance-based clustering)
-# ================================================================================
-print("\nRunning K-Means for algorithm benchmark...")
-
-# We force K-Means to find 9 clusters (since Leiden res=0.50 found 9 clusters)
-kmeans = KMeans(n_clusters=9, random_state=42)
-kmeans.fit(adata.obsm['X_pca_harmony'])
-
-# Save the K-Means results in the adata object
-adata.obs['kmeans'] = kmeans.labels_.astype(str)
-adata.obs['kmeans'] = adata.obs['kmeans'].astype('category')
-
-
-# ================================================================================
-# ALGORITHM 2: GiniClust3 (Rare Cell Type Detection)
-# ================================================================================
-print("\nRunning GiniClust3 for rare cell type detection benchmark...")
-
-from giniclust3 import gini
-import scipy.sparse
-
-# Use 'adata_full' (saved before HVG filtering) so rare genes are not lost
-adata_gini = adata_full.copy()
-adata_gini.X = adata_gini.layers["counts"].copy()
-
-# Unpack sparse matrix to dense array for GiniClust3 to avoid length errors
-if scipy.sparse.issparse(adata_gini.X):
-    adata_gini.X = adata_gini.X.toarray()
-
-print("Calculating Gini Index (This might take a minute)...")
-gini.calGini(adata_gini)
-
-
-print("Clustering based on high Gini genes...")
-adata_gini = gini.clusterGini(adata_gini)
-
-adata.obs['giniclust'] = adata_gini.obs['leiden'].values.astype('category')
-
-# ================================================================================
-# FINAL BENCHMARK PLOT
-# ================================================================================
-
-# --- GiniClust3: label zeldzame cellen ---
-# Tel hoeveel cellen per GiniClust3-cluster
-cluster_sizes = adata.obs['giniclust'].value_counts()
-
-# Clusters met minder dan 50 cellen = zeldzaam
-rare_clusters = cluster_sizes[cluster_sizes < 50].index
-
-# Nieuwe kolom: 'Zeldzaam' of 'Gewoon'
-adata.obs['giniclust_rare'] = adata.obs['giniclust'].apply(
-    lambda x: 'Zeldzaam' if x in rare_clusters else 'Gewoon'
-).astype('category')
-
-print(f"Aantal zeldzame cellen: {(adata.obs['giniclust_rare'] == 'Zeldzaam').sum()}")
-print(f"Aantal gewone cellen:   {(adata.obs['giniclust_rare'] == 'Gewoon').sum()}")
-
-# Plot Leiden en K-Means samen
-sc.pl.umap(
-    adata,
-    color=["leiden_res_0.50", "kmeans"],
-    wspace=0.4,
-    title=["Leiden (Graph)", "K-Means (Distance)"]
-)
-
-# Plot GiniClust3 apart (met eigen kleurenpalet)
-sc.pl.umap(
-    adata,
-    color="giniclust_rare",
-    title="GiniClust3: Zeldzame vs. Gewone cellen",
-    palette={'Zeldzaam': 'red', 'Gewoon': 'lightgrey'}
-)
-
-print("Benchmark complete!")
