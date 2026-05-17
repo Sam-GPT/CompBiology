@@ -17,11 +17,12 @@ plt.ylabel('Proportion of Cells')
 plt.legend(title=f'SC3 Cluster (k={CLUSTER_COL.split("k")[1]})',
            bbox_to_anchor=(1.05, 1), loc='upper left')
 plt.tight_layout()
-plt.show()
+plt.savefig('figures/composition_anterior_vs_posterior.png', dpi=150, bbox_inches='tight')
+plt.close()
 
 # 2. UMAP separated by Region
 print("Generating comparative UMAPs...")
-sc.pl.umap(adata, color=[CLUSTER_COL, 'group'], wspace=0.4)
+sc.pl.umap(adata, color=[CLUSTER_COL, 'group'], wspace=0.4, save='_sc3_vs_region.png')
 
 # 3. Gene Expression by Cluster AND Region
 print("Generating comparative dotplot...")
@@ -48,6 +49,7 @@ sc.pl.dotplot(
     gene_symbols='feature_name' if 'feature_name' in adata.var.columns else None,
     standard_scale='var',
     title=f'Top Auto-Discovered Markers by Cluster and Region ({CLUSTER_COL})',
+    save='_marker_by_cluster_region.png',
 )
 
 # 4. Global DGE: Anterior vs Posterior
@@ -59,4 +61,5 @@ sc.pl.rank_genes_groups_dotplot(
     n_genes=25,
     gene_symbols='feature_name' if 'feature_name' in adata.var.columns else None,
     title='Top Regional Differences: Anterior vs Posterior',
+    save='_anterior_vs_posterior_dge.png',
 )

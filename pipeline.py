@@ -1,41 +1,29 @@
+import logging
+
 import scanpy as sc
-import pandas as pd
-import matplotlib.pyplot as plt
-import scanpy.external as sce
 import harmonypy as hm
-import mygene
-from load_data import load_tsv_data
+from load_data import load_h5ad_data
 from sc3 import sc3_cluster, sc3_benchmark_plot
 
 sc.settings.verbosity = 3
+sc.settings.autoshow = False
 sc.settings.set_figure_params(dpi=150, facecolor='white')
+
+
+class _DropSaveFigMsg(logging.Filter):
+    def filter(self, record):
+        return "saving figure to file" not in record.getMessage()
+
+
+sc.settings._root_logger.addFilter(_DropSaveFigMsg())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Read in the data
 # ─────────────────────────────────────────────────────────────────────────────
-adata = load_tsv_data('data.tsv', 'label.ann')
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Map Ensembl IDs to readable gene symbols
-# ─────────────────────────────────────────────────────────────────────────────
-# Without this, all marker genes show as ENSG000... instead of e.g. MBP, SNAP25
-print("Mapping Ensembl IDs to gene symbols (requires internet) ...")
-mg = mygene.MyGeneInfo()
-gene_ids = adata.var.index.tolist()
-result = mg.querymany(
-    gene_ids,
-    scopes='ensembl.gene',
-    fields='symbol',
-    species='human',
-    as_dataframe=True,
-    verbose=False,
-)
-# 'symbol' column contains the gene name; fall back to the Ensembl ID if not found
-adata.var['gene_symbol'] = result['symbol'].reindex(adata.var.index)
-adata.var['feature_name'] = adata.var['gene_symbol'].fillna(adata.var.index.to_series())
-print(f"  Mapped {adata.var['gene_symbol'].notna().sum()} / {adata.n_vars} genes to symbols.")
+# Full CellxGene h5ad has 130k cells × 17k genes; we subsample to 10k for runtime.
+# feature_name (gene symbols) and group/batch obs columns are already present.
+adata = load_h5ad_data('703771a1-236f-4eda-9c04-318d882e149b.h5ad', n_cells=10000)
 
 
 ## 1. Normalize / Preprocess
@@ -58,17 +46,14 @@ sc.pl.violin(
 )
 
 # Filter cells
-# min_genes=20 instead of 200: our dataset has only 2000 genes (a pre-selected
-# HVG subset from CellxGene). 20/2000 = 1%, equivalent to 200/20000 on a full genome.
-sc.pp.filter_cells(adata, min_genes=20)
+# Full-genome data (~17k genes); 200 is the standard 10x Genomics QC floor.
+sc.pp.filter_cells(adata, min_genes=200)
 sc.pp.filter_genes(adata, min_cells=3)
 
-# Doublet Detection — DISABLED
-# The CellxGene download is already a pre-normalized matrix (non-integer values),
-# not raw UMI counts. Scrublet requires raw counts and produced nonsensical estimates
-# (up to 168% doublet rate) on this data, so we skip it entirely.
-# sc.pp.scrublet(adata, batch_key="batch")
-# adata = adata[adata.obs["doublet_score"] < 0.56].copy()
+# Doublet Detection
+# Now that we load raw counts from the h5ad's .raw layer, Scrublet works correctly.
+sc.pp.scrublet(adata, batch_key="batch")
+adata = adata[~adata.obs["predicted_doublet"]].copy()
 
 # Normalization and Feature Selection
 
@@ -80,8 +65,7 @@ sc.pp.normalize_total(adata)
 # Logarithmize the data
 sc.pp.log1p(adata)
 
-# Identify highly variable genes
-# n_top_genes=2000 with only ~2000 genes available means all genes are selected, that's fine.
+# Identify highly variable genes from raw counts (seurat_v3 expects integer counts).
 sc.pp.highly_variable_genes(
     adata,
     n_top_genes=2000,
@@ -194,6 +178,8 @@ sc.tl.rank_genes_groups(
     use_raw=False,
 )
 
+sc.tl.dendrogram(adata, groupby=chosen_cluster_key, use_rep="X_pca_harmony")
+
 # Dotplot: top 5 marker genes per cluster, using readable gene symbols
 sc.pl.rank_genes_groups_dotplot(
     adata,
@@ -202,7 +188,7 @@ sc.pl.rank_genes_groups_dotplot(
     gene_symbols="feature_name",
     standard_scale="var",
     title="Top 5 Marker Genes per Cluster",
-    save="_dotplot_marker_genes.png",
+    save="_marker_genes.png",
 )
 
 # Print top 10 markers for cluster 0 with readable names

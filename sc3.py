@@ -410,6 +410,6 @@ def sc3_benchmark_plot(adata, k_range, leiden_key: str = 'leiden_res_0.50',
     os.makedirs(os.path.dirname(out_path) if os.path.dirname(out_path) else '.', exist_ok=True)
     plt.savefig(out_path, dpi=150, bbox_inches='tight')
     print(f"[SC3] Benchmark plot saved to {out_path}")
-    plt.show()
+    plt.close(fig)
 
     return df

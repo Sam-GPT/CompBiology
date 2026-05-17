@@ -1,10 +1,15 @@
 """
-load_data.py, load data.tsv + label.ann into an AnnData object
+load_data.py — load expression data into an AnnData object.
+
+Two loaders:
+  * load_tsv_data : original 4,994-cell TSV + label.ann (pre-normalized).
+  * load_h5ad_data: full CellxGene h5ad (130k cells, includes raw counts).
 """
 
 import numpy as np
 import pandas as pd
 import anndata as ad
+import scanpy as sc
 
 
 def load_tsv_data(tsv_path: str = 'data.tsv',
@@ -132,6 +137,55 @@ def load_tsv_data(tsv_path: str = 'data.tsv',
     # ------------------------------------------------------------------ #
     print(f"\n[load_data] AnnData ready: {adata.n_obs} cells x {adata.n_vars} genes")
     print(f"            obs columns : {list(adata.obs.columns)}")
+
+    return adata
+
+
+def load_h5ad_data(path: str,
+                   n_cells: int = 10000,
+                   random_state: int = 42,
+                   verbose: bool = True) -> ad.AnnData:
+    """
+    Load a CellxGene h5ad and randomly subsample.
+
+    The CellxGene h5ad stores log-normalized values in .X and raw integer counts
+    in .raw.X. We swap .X to the raw counts so the downstream pipeline (which
+    expects raw counts and runs normalize_total + log1p itself) works correctly.
+
+    Required obs columns in the source h5ad: 'group' (anterior/posterior),
+    'batch', 'cell_type'. Required var column: 'feature_name'.
+    """
+    print(f"[load_data] Reading {path} ...")
+    adata = sc.read_h5ad(path)
+    if verbose:
+        print(f"[load_data]   Full shape: {adata.n_obs} cells x {adata.n_vars} genes")
+
+    if adata.raw is None:
+        raise RuntimeError(
+            f"{path} has no .raw — cannot recover raw counts. "
+            "Pipeline requires raw counts for HVG selection (seurat_v3)."
+        )
+    adata.X = adata.raw.X.copy()
+    adata.raw = None
+    if verbose:
+        print("[load_data]   Replaced .X with raw integer counts from .raw.X")
+
+    if n_cells is not None and n_cells < adata.n_obs:
+        sc.pp.subsample(adata, n_obs=n_cells, random_state=random_state)
+        if verbose:
+            print(f"[load_data]   Subsampled to {adata.n_obs} cells (seed={random_state}).")
+
+    for col in ('group', 'batch', 'cell_type'):
+        if col not in adata.obs.columns:
+            raise RuntimeError(f"Expected obs column '{col}' not found in {path}.")
+    if 'feature_name' not in adata.var.columns:
+        raise RuntimeError(f"Expected var column 'feature_name' not found in {path}.")
+
+    if verbose:
+        print(f"[load_data]   'group': {dict(adata.obs['group'].value_counts())}")
+        print(f"[load_data]   'batch': {sorted(adata.obs['batch'].astype(str).unique())}")
+        print(f"\n[load_data] AnnData ready: {adata.n_obs} cells x {adata.n_vars} genes")
+        print(f"            obs columns : {list(adata.obs.columns)[:10]}...")
 
     return adata
 
