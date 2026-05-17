@@ -3,74 +3,60 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import scanpy.external as sce
 import harmonypy as hm
-
-
+from sklearn.cluster import DBSCAN
+import numpy as np
 
 sc.settings.verbosity = 3
 sc.settings.set_figure_params(dpi=150, facecolor='white')
 
 
 # Read in the data
+print("Reading data from 'data.h5ad'...", end='\t')
 adata = sc.read_h5ad('data.h5ad')
+print("Done")
 
-# Limit to 30K cells
-adata = adata[:30000, :].copy()
+# Limit to 50K cells
+adata = adata[:50000, :].copy()
 
 
 ## 1. Normalize / Preprocess
 
 # Annotate gene populations
-# mitochondrial genes, "MT-" for human, "Mt-" for mouse
+print("Annotating gene populations...")
 adata.var["mt"] = adata.var["feature_name"].str.upper().str.startswith("MT-")
-# ribosomal genes
+print("\tMitochondrial genes")
 adata.var["ribo"] = adata.var["feature_name"].str.upper().str.startswith(("RPS", "RPL"))
-# hemoglobin genes
+print("\tRibosomal genes")
 adata.var["hb"] = adata.var["feature_name"].str.upper().str.contains("^HB[^(P)]")
-
-
+print("\tHemoglobin genes")
 
 # Calculate QC metrics
+print("Calculating QC metrics")
 sc.pp.calculate_qc_metrics(adata, qc_vars=["mt", "ribo", "hb"], inplace=True, log1p=True)
 
-
-# Visualize QC metrics
-# n_genes_by_counts: Number of genes detected in a cell
-# total_counts: Total number of molecules (UMIs) in a cell
-# pct_counts_mt: Percentage of mitochondrial genes in a cell
-# sc.pl.violin(
-#     adata,
-#     ["n_genes_by_counts", "total_counts", "pct_counts_mt"],
-#     jitter=0.4,
-#     multi_panel=True,
-# )
-
 # Filter cells
-sc.pp.filter_cells(adata, min_genes=200) # Keeps only cells that express at least 200 genes
-sc.pp.filter_genes(adata, min_cells=3) # Keeps only genes that are expressed in at least 3 cells
-
+print("Filtering cells")
+sc.pp.filter_cells(adata, min_genes=200)
+sc.pp.filter_genes(adata, min_cells=3)
 
 # Doublet Detection
-sc.pp.scrublet(adata, batch_key="batch") # doublet: which are multiple cells captured in one droplet.
-
-# Visualize doublet scores and predicted doublets 
-# sc.pl.umap(adata, color=["doublet_score", "predicted_doublet"])
+print("Doublet detection")
+sc.pp.scrublet(adata, batch_key="batch")
 
 adata = adata[adata.obs["doublet_score"] < 0.56].copy()
 
 # Normalization and Feature Selection
-
-# Saving count data
 adata.layers["counts"] = adata.X.copy()
 
-# Normalizing to median total counts
+print("Normalizing to median total counts")
 sc.pp.normalize_total(adata)
-# Logarithmize the data
+print("Logarithmize the data")
 sc.pp.log1p(adata)
 
-# Identify 2,000 highly variable genes (HVGs)
+print("Identifying HVGs (highly variable genes)")
 sc.pp.highly_variable_genes(
-    adata, 
-    n_top_genes=2000, 
+    adata,
+    n_top_genes=2000,
     batch_key="batch",
     subset=False,
     flavor="seurat_v3",
@@ -80,129 +66,163 @@ sc.pp.highly_variable_genes(
 adata = adata[:, adata.var["highly_variable"]].copy()
 
 
-
 ## 2. Batch Effect Correction
+print("Batch Effect Correction")
 
-# Dimensionality reduction using PCA
+print("\tDimensionality reduction")
 sc.tl.pca(adata, svd_solver="arpack")
 
+Z = adata.obsm["X_pca"]
 
-# Visualizes how much variance the first 50 PCA dimensions explain (on a log scale)
-# sc.pl.pca_variance_ratio(adata, n_pcs=50, log=True)
-
-
-
-Z = adata.obsm["X_pca"]   # (9769, 50)
-
-# run harmony directly
-ho = hm.run_harmony(
-    Z,
-    adata.obs,
-    vars_use=["batch"]
-)
-
-# correct orientation fix
+ho = hm.run_harmony(Z, adata.obs, vars_use=["batch"])
 adata.obsm["X_pca_harmony"] = ho.Z_corr.T
 
-
-# # Before Harmony Batch correction (Plotting the PCA colored by batch to see the batch effect)
-# sc.pl.pca(adata, color="batch")
-
-# # After Harmony Batch correction (Plotting the Harmony-corrected PCA colored by batch to see if the batch effect is reduced)
-# sc.pl.embedding(
-#     adata,
-#     basis="X_pca_harmony",
-#     color="batch"
-# )
-
-# Constructing the neighborhood graph using the Harmony-corrected PCA embeddings
+print("\tConstructing neighbourhood graph using Harmony-corrected PCA embeddings")
 sc.pp.neighbors(adata, use_rep="X_pca_harmony")
 sc.tl.umap(adata)
 
-# Visualize the UMAP colored by batch to check if the batch effect has been mitigated
-# sc.pl.umap(
-#     adata,
-#     color="batch",
-#     # Setting a smaller point size to get prevent overlap
-#     size=2,
-# )
 
+## 3. Clustering: DBSCAN
+print("Running DBSCAN clustering...")
 
+# Run on the 2D UMAP embedding rather than PCA
+# the UMAP separates the visible lobes cleanly
+#  so distances are uniform and a single eps works globally
+embedding = adata.obsm["X_umap"]   # shape: (n_cells, 2)
 
+DBSCAN_PARAMS = [
+    {"eps": 0.3, "min_samples": 10, "key": "dbscan_eps0.3"},
+    {"eps": 0.5, "min_samples": 10, "key": "dbscan_eps0.5"},
+    {"eps": 0.8, "min_samples": 10, "key": "dbscan_eps0.8"},
+]
 
+for params in DBSCAN_PARAMS:
+    print(f"\tRunning DBSCAN (eps={params['eps']}, min_samples={params['min_samples']})...")
+    db = DBSCAN(eps=params["eps"], min_samples=params["min_samples"], n_jobs=-1)
+    labels = db.fit_predict(embedding)
 
+    str_labels = np.where(labels == -1, "Noise", labels.astype(str))
+    adata.obs[params["key"]] = pd.Categorical(str_labels)
 
+    n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+    n_noise    = (labels == -1).sum()
+    print(f"\t  -> {n_clusters} clusters found, {n_noise} noise points ({n_noise/len(labels)*100:.1f}%)")
 
-
-
-
-
-
-## 3. Clustering
-print("Running clustering...")
-
-# Method: Leiden algorithm (The modern standard)
-# We test multiple resolutions to benchmark how it affects the number of clusters (as seen on slide 35)
-
-sc.tl.leiden(adata, resolution=0.25, key_added="leiden_res_0.25")
-sc.tl.leiden(adata, resolution=0.5, key_added="leiden_res_0.50")
-sc.tl.leiden(adata, resolution=1.0, key_added="leiden_res_1.00")
-
-# Visualize the clustering results side-by-side on the UMAP for your benchmark report
+# Visualize the three parameterisations side by side
 sc.pl.umap(
     adata,
-    color=["leiden_res_0.25", "leiden_res_0.50", "leiden_res_1.00"],
+    color=[p["key"] for p in DBSCAN_PARAMS],
     wspace=0.4,
-    title=["Leiden (Res=0.25)", "Leiden (Res=0.50)", "Leiden (Res=1.0)"]
+    title=[f"DBSCAN (eps={p['eps']})" for p in DBSCAN_PARAMS],
 )
 
+# Choose the best parameterisation for downstream analysis
+chosen_cluster_key = "dbscan_eps0.5"
+
+# Noise cells confuse rank_genes_groups — work on a clean subset for DGE
+adata_clean = adata[adata.obs[chosen_cluster_key] != "Noise"].copy()
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-## 4. Cluster Interpretation (Finding meaning in the presence of noise)
+## 4. Cluster Interpretation
 print("Running Differential Gene Expression to find marker genes...")
 
-# Let's proceed with the Leiden algorithm at 0.50 resolution for our interpretation
-chosen_cluster_key = "leiden_res_0.50"
-
-# Rank genes to find cluster-specific marker genes
-# 'wilcoxon' is the standard non-parametric statistical test used for this
 sc.tl.rank_genes_groups(
-    adata,
+    adata_clean,
     groupby=chosen_cluster_key,
     method="wilcoxon",
-    use_raw=False
+    use_raw=False,
 )
 
-# 4a. Visualize the top 5 marker genes for each cluster using a Dotplot
-# Dotplots are excellent for interpreting clusters (as shown on slide 36)
-# It shows both the mean expression (color) and fraction of cells expressing the gene (dot size)
 sc.pl.rank_genes_groups_dotplot(
-    adata,
+    adata_clean,
     n_genes=5,
     groupby=chosen_cluster_key,
-    standard_scale="var", # Scales expression between 0 and 1 for easier visual comparison
-    title="Top 5 Marker Genes per Cluster"
+    standard_scale="var",
+    title="Top 5 Marker Genes per Cluster (DBSCAN)",
 )
 
-# 4b. Extract the marker genes into a DataFrame to investigate biologically
-# Let's say you want to look at the top markers for Cluster '0'
-cluster_0_markers = sc.get.rank_genes_groups_df(adata, group="0")
-
+cluster_0_markers = sc.get.rank_genes_groups_df(adata_clean, group="0")
 print("\n--- Top 10 marker genes for Cluster 0 ---")
 print(cluster_0_markers.head(10))
 
-# Note for your assignment report:
-# Once you have these gene lists, you would typically look them up in biological databases
-# (like CellMarker or literature) to say "Cluster 0 is highly expressing CD14, so it is a Monocyte."
+
+## 5. Cell Type Composition by Region
+print("Generating composition plot...")
+
+# Cross-tabulate region (group) vs DBSCAN cluster
+# normalize per row so each bar sums to 1 and regions with
+#  different cell counts are directly comparable.
+composition = pd.crosstab(
+    adata_clean.obs['group'],
+    adata_clean.obs[chosen_cluster_key],
+    normalize='index'
+)
+
+ax = composition.plot(kind='bar', stacked=True, figsize=(10, 6))
+plt.title('Cell Type Composition: Anterior vs Posterior Hippocampus')
+plt.xlabel('Region (group)')
+plt.ylabel('Proportion of Cells')
+plt.legend(title='DBSCAN Cluster', bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.tight_layout()
+plt.show()
+
+
+## 6. UMAP separated by Region
+print("Generating comparative UMAPs...")
+sc.pl.umap(adata_clean, color=[chosen_cluster_key, 'group'], wspace=0.4)
+
+
+## 7. Gene Expression by Cluster AND Region (Using Auto-Discovered Markers)
+print("Generating comparative dotplot...")
+
+# Concatenate cluster label and region so each bar represents one cluster/region
+# combination, e.g. "0_anterior", "1_posterior", etc.
+adata_clean.obs['cluster_region'] = (
+    adata_clean.obs[chosen_cluster_key].astype(str)
+    + "_"
+    + adata_clean.obs['group'].astype(str)
+)
+
+# Dynamically extract the top 5 marker genes per cluster from the DGE run above
+dge_result = adata_clean.uns['rank_genes_groups']['names']
+top_markers = []
+
+for cluster_name in dge_result.dtype.names:
+    top_markers.extend(dge_result[cluster_name][:5])
+
+# Remove duplicates while preserving order
+top_markers = list(dict.fromkeys(top_markers))
+
+# Resolve gene IDs -> human-readable symbols if feature_name is available
+if adata_clean.raw is not None and 'feature_name' in adata_clean.raw.var.columns:
+    marker_symbols = adata_clean.raw.var.loc[top_markers, 'feature_name'].tolist()
+else:
+    marker_symbols = top_markers
+
+sc.pl.dotplot(
+    adata_clean,
+    var_names=marker_symbols,
+    groupby='cluster_region',
+    gene_symbols='feature_name',
+    standard_scale='var',
+    title="Top Auto-Discovered Markers by Cluster and Region (DBSCAN)",
+)
+
+
+## 8. Global DGE: Anterior vs Posterior
+print("Running DGE between anterior and posterior regions...")
+
+sc.tl.rank_genes_groups(
+    adata_clean,
+    groupby='group',
+    method="wilcoxon",
+    use_raw=False,
+)
+
+sc.pl.rank_genes_groups_dotplot(
+    adata_clean,
+    n_genes=25,
+    gene_symbols='feature_name',
+    title="Top Regional Differences: Anterior vs Posterior (DBSCAN)",
+)
+
