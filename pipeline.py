@@ -3,6 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import scanpy.external as sce
 import harmonypy as hm
+import os
 
 
 
@@ -14,7 +15,11 @@ sc.settings.set_figure_params(dpi=150, facecolor='white')
 adata = sc.read_h5ad('data.h5ad')
 
 # Limit to 30K cells
-adata = adata[:30000, :].copy()
+adata = adata[:3000, :].copy()
+
+print("Variable columns:", adata.var.columns)
+print("Observation columns:", adata.obs.columns)
+
 
 
 ## 1. Normalize / Preprocess
@@ -77,6 +82,10 @@ sc.pp.highly_variable_genes(
     layer="counts",
 )
 
+# ADD THIS LINE: Save the normalized/log-transformed data including all genes
+adata.raw = adata
+
+# Subsetting to highly variable genes
 adata = adata[:, adata.var["highly_variable"]].copy()
 
 
@@ -131,11 +140,17 @@ sc.tl.umap(adata)
 
 
 
+# adata.to_df().T.to_csv("data/MyDataset/data.tsv", sep="\t")
+
+# adata.obs["cell_type"].to_csv(
+#     "data/MyDataset/label.ann",
+#     sep="\t",
+#     header=False
+# )
 
 
 
-
-
+print("Done")
 
 
 ## 3. Clustering
@@ -144,21 +159,35 @@ print("Running clustering...")
 # Method: Leiden algorithm (The modern standard)
 # We test multiple resolutions to benchmark how it affects the number of clusters (as seen on slide 35)
 
-sc.tl.leiden(adata, resolution=0.25, key_added="leiden_res_0.25")
-sc.tl.leiden(adata, resolution=0.5, key_added="leiden_res_0.50")
-sc.tl.leiden(adata, resolution=1.0, key_added="leiden_res_1.00")
+# sc.tl.leiden(adata, resolution=0.25, key_added="leiden_res_0.25")
+# sc.tl.leiden(adata, resolution=0.5, key_added="leiden_res_0.50")
+# sc.tl.leiden(adata, resolution=1.0, key_added="leiden_res_1.00")
 
-# Visualize the clustering results side-by-side on the UMAP for your benchmark report
-sc.pl.umap(
-    adata,
-    color=["leiden_res_0.25", "leiden_res_0.50", "leiden_res_1.00"],
-    wspace=0.4,
-    title=["Leiden (Res=0.25)", "Leiden (Res=0.50)", "Leiden (Res=1.0)"]
-)
-
-
+# # Visualize the clustering results side-by-side on the UMAP for your benchmark report
+# sc.pl.umap(
+#     adata,
+#     color=["leiden_res_0.25", "leiden_res_0.50", "leiden_res_1.00"],
+#     wspace=0.4,
+#     title=["Leiden (Res=0.25)", "Leiden (Res=0.50)", "Leiden (Res=1.0)"]
+# )
 
 
+
+
+
+predicted_labels = pd.read_csv('result/pred_MyDataset.txt', sep='\t')
+
+adata.obs['scDFC_cluster'] = predicted_labels['label'].astype(str).values
+
+
+
+# Markers we saw in your earlier successful plot:
+confirmed_markers = ['CTNNA3', 'PITPNC1', 'TNR', 'RBFOX3', 'PLXNA4', 'LRMDA']
+
+# Filter just in case
+to_plot = [g for g in confirmed_markers if g in adata.var['feature_name'].values]
+
+# sc.pl.umap(adata, color=to_plot, gene_symbols='feature_name', ncols=3)
 
 
 
@@ -173,36 +202,91 @@ sc.pl.umap(
 ## 4. Cluster Interpretation (Finding meaning in the presence of noise)
 print("Running Differential Gene Expression to find marker genes...")
 
-# Let's proceed with the Leiden algorithm at 0.50 resolution for our interpretation
-chosen_cluster_key = "leiden_res_0.50"
 
-# Rank genes to find cluster-specific marker genes
-# 'wilcoxon' is the standard non-parametric statistical test used for this
 sc.tl.rank_genes_groups(
     adata,
-    groupby=chosen_cluster_key,
-    method="wilcoxon",
-    use_raw=False
+    groupby="scDFC_cluster",
+    method="wilcoxon"
 )
 
-# 4a. Visualize the top 5 marker genes for each cluster using a Dotplot
-# Dotplots are excellent for interpreting clusters (as shown on slide 36)
-# It shows both the mean expression (color) and fraction of cells expressing the gene (dot size)
-sc.pl.rank_genes_groups_dotplot(
+
+# sc.pl.rank_genes_groups(adata)
+# Use 'feature_name' to tell Scanpy where the readable symbols are
+# sc.pl.rank_genes_groups(adata, n_genes=20, gene_symbols='feature_name', sharey=False)
+
+# 1. Cell Type Composition by Region
+print("Generating composition plot...")
+composition = pd.crosstab(adata.obs['group'], adata.obs['scDFC_cluster'], normalize='index')
+
+ax = composition.plot(kind='bar', stacked=True, figsize=(10, 6))
+plt.title('Cell Type Composition: Anterior vs Posterior Hippocampus')
+plt.xlabel('Region (group)')
+plt.ylabel('Proportion of Cells')
+plt.legend(title='scDFC Cluster', bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.tight_layout()
+
+
+
+os.makedirs("figures", exist_ok=True)
+plt.savefig("figures/composition_bar.png", dpi=300, bbox_inches='tight')
+plt.close() # Closes the plot so it doesn't wait for your input
+
+# 2. UMAP separated by Region
+print("Generating comparative UMAPs...")
+sc.pl.umap(adata, color=['scDFC_cluster', 'group'], wspace=0.4, save="_comparative.png", show=False)
+
+# 3. Gene Expression by Cluster AND Region (Using Auto-Discovered Markers)
+print("Generating comparative dotplot...")
+
+adata.obs['cluster_region'] = adata.obs['scDFC_cluster'].astype(str) + "_" + adata.obs['group'].astype(str)
+
+
+# Dynamically extract the top 5 marker genes for each cluster from the previous DGE run
+dge_result = adata.uns['rank_genes_groups']['names']
+top_markers = []
+
+for cluster_name in dge_result.dtype.names:
+    top_markers.extend(dge_result[cluster_name][:5]) 
+
+# Remove any duplicates 
+top_markers = list(dict.fromkeys(top_markers))
+
+
+if 'feature_name' in adata.raw.var.columns:
+    marker_symbols = adata.raw.var.loc[top_markers, 'feature_name'].tolist()
+else:
+    marker_symbols = top_markers
+
+sc.pl.dotplot(
+    adata, 
+    var_names=marker_symbols, 
+    groupby='cluster_region', 
+    gene_symbols='feature_name',
+    standard_scale='var',
+    title="Top Auto-Discovered Markers by Cluster and Region",
+    save="_cluster_region_markers.png",
+    show=False
+)
+
+# 4. Global DGE: Anterior vs Posterior
+print("Running DGE between anterior and posterior regions...")
+sc.tl.rank_genes_groups(
     adata,
-    n_genes=5,
-    groupby=chosen_cluster_key,
-    standard_scale="var", # Scales expression between 0 and 1 for easier visual comparison
-    title="Top 5 Marker Genes per Cluster"
+    groupby='group', 
+    method="wilcoxon"
 )
 
-# 4b. Extract the marker genes into a DataFrame to investigate biologically
-# Let's say you want to look at the top markers for Cluster '0'
-cluster_0_markers = sc.get.rank_genes_groups_df(adata, group="0")
+# Visualize the top 25 genes driving the difference between regions
+sc.pl.rank_genes_groups_dotplot(
+    adata, 
+    n_genes=25, 
+    gene_symbols='feature_name', 
+    title="Top Regional Differences: Anterior vs Posterior",
+    save="_anterior_vs_posterior.png",
+    show=False
+)
 
-print("\n--- Top 10 marker genes for Cluster 0 ---")
-print(cluster_0_markers.head(10))
 
-# Note for your assignment report:
-# Once you have these gene lists, you would typically look them up in biological databases
-# (like CellMarker or literature) to say "Cluster 0 is highly expressing CD14, so it is a Monocyte."
+
+
+
