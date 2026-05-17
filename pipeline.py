@@ -3,59 +3,72 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import scanpy.external as sce
 import harmonypy as hm
-
-
+import mygene
+from load_data import load_tsv_data
+from sc3 import sc3_cluster, sc3_benchmark_plot
 
 sc.settings.verbosity = 3
 sc.settings.set_figure_params(dpi=150, facecolor='white')
 
 
+# ─────────────────────────────────────────────────────────────────────────────
 # Read in the data
-adata = sc.read_h5ad('data.h5ad')
+# ─────────────────────────────────────────────────────────────────────────────
+adata = load_tsv_data('data.tsv', 'label.ann')
 
-# Limit to 30K cells
-adata = adata[:30000, :].copy()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Map Ensembl IDs to readable gene symbols
+# ─────────────────────────────────────────────────────────────────────────────
+# Without this, all marker genes show as ENSG000... instead of e.g. MBP, SNAP25
+print("Mapping Ensembl IDs to gene symbols (requires internet) ...")
+mg = mygene.MyGeneInfo()
+gene_ids = adata.var.index.tolist()
+result = mg.querymany(
+    gene_ids,
+    scopes='ensembl.gene',
+    fields='symbol',
+    species='human',
+    as_dataframe=True,
+    verbose=False,
+)
+# 'symbol' column contains the gene name; fall back to the Ensembl ID if not found
+adata.var['gene_symbol'] = result['symbol'].reindex(adata.var.index)
+adata.var['feature_name'] = adata.var['gene_symbol'].fillna(adata.var.index.to_series())
+print(f"  Mapped {adata.var['gene_symbol'].notna().sum()} / {adata.n_vars} genes to symbols.")
 
 
 ## 1. Normalize / Preprocess
 
-# Annotate gene populations
-# mitochondrial genes, "MT-" for human, "Mt-" for mouse
-adata.var["mt"] = adata.var["feature_name"].str.upper().str.startswith("MT-")
-# ribosomal genes
+# Annotate gene populations using readable gene symbols
+adata.var["mt"]   = adata.var["feature_name"].str.upper().str.startswith("MT-")
 adata.var["ribo"] = adata.var["feature_name"].str.upper().str.startswith(("RPS", "RPL"))
-# hemoglobin genes
-adata.var["hb"] = adata.var["feature_name"].str.upper().str.contains("^HB[^(P)]")
-
-
+adata.var["hb"]   = adata.var["feature_name"].str.upper().str.contains("^HB[^(P)]")
 
 # Calculate QC metrics
 sc.pp.calculate_qc_metrics(adata, qc_vars=["mt", "ribo", "hb"], inplace=True, log1p=True)
 
-
 # Visualize QC metrics
-# n_genes_by_counts: Number of genes detected in a cell
-# total_counts: Total number of molecules (UMIs) in a cell
-# pct_counts_mt: Percentage of mitochondrial genes in a cell
-# sc.pl.violin(
-#     adata,
-#     ["n_genes_by_counts", "total_counts", "pct_counts_mt"],
-#     jitter=0.4,
-#     multi_panel=True,
-# )
+sc.pl.violin(
+    adata,
+    ["n_genes_by_counts", "total_counts", "pct_counts_mt"],
+    jitter=0.4,
+    multi_panel=True,
+    save="_qc_metrics.png",
+)
 
 # Filter cells
-sc.pp.filter_cells(adata, min_genes=200) # Keeps only cells that express at least 200 genes
-sc.pp.filter_genes(adata, min_cells=3) # Keeps only genes that are expressed in at least 3 cells
+# min_genes=20 instead of 200: our dataset has only 2000 genes (a pre-selected
+# HVG subset from CellxGene). 20/2000 = 1%, equivalent to 200/20000 on a full genome.
+sc.pp.filter_cells(adata, min_genes=20)
+sc.pp.filter_genes(adata, min_cells=3)
 
-
-# Doublet Detection
-sc.pp.scrublet(adata, batch_key="batch") # doublet: which are multiple cells captured in one droplet.
-
-# Visualize doublet scores and predicted doublets 
-# sc.pl.umap(adata, color=["doublet_score", "predicted_doublet"])
-
-adata = adata[adata.obs["doublet_score"] < 0.56].copy()
+# Doublet Detection — DISABLED
+# The CellxGene download is already a pre-normalized matrix (non-integer values),
+# not raw UMI counts. Scrublet requires raw counts and produced nonsensical estimates
+# (up to 168% doublet rate) on this data, so we skip it entirely.
+# sc.pp.scrublet(adata, batch_key="batch")
+# adata = adata[adata.obs["doublet_score"] < 0.56].copy()
 
 # Normalization and Feature Selection
 
@@ -67,10 +80,11 @@ sc.pp.normalize_total(adata)
 # Logarithmize the data
 sc.pp.log1p(adata)
 
-# Identify 2,000 highly variable genes (HVGs)
+# Identify highly variable genes
+# n_top_genes=2000 with only ~2000 genes available means all genes are selected, that's fine.
 sc.pp.highly_variable_genes(
-    adata, 
-    n_top_genes=2000, 
+    adata,
+    n_top_genes=2000,
     batch_key="batch",
     subset=False,
     flavor="seurat_v3",
@@ -80,129 +94,122 @@ sc.pp.highly_variable_genes(
 adata = adata[:, adata.var["highly_variable"]].copy()
 
 
-
 ## 2. Batch Effect Correction
 
 # Dimensionality reduction using PCA
 sc.tl.pca(adata, svd_solver="arpack")
 
+# Visualizes how much variance the first 50 PCA dimensions explain
+sc.pl.pca_variance_ratio(adata, n_pcs=50, log=True, save="_pca_variance.png")
 
-# Visualizes how much variance the first 50 PCA dimensions explain (on a log scale)
-# sc.pl.pca_variance_ratio(adata, n_pcs=50, log=True)
+Z = adata.obsm["X_pca"]
 
-
-
-Z = adata.obsm["X_pca"]   # (9769, 50)
-
-# run harmony directly
+# Run Harmony batch correction
 ho = hm.run_harmony(
     Z,
     adata.obs,
     vars_use=["batch"]
 )
-
-# correct orientation fix
 adata.obsm["X_pca_harmony"] = ho.Z_corr.T
 
+# Before Harmony: PCA coloured by batch
+sc.pl.pca(
+    adata,
+    color="batch",
+    title="PCA before Harmony (coloured by batch)",
+    save="_pca_before_harmony.png",
+)
 
-# # Before Harmony Batch correction (Plotting the PCA colored by batch to see the batch effect)
-# sc.pl.pca(adata, color="batch")
-
-# # After Harmony Batch correction (Plotting the Harmony-corrected PCA colored by batch to see if the batch effect is reduced)
-# sc.pl.embedding(
-#     adata,
-#     basis="X_pca_harmony",
-#     color="batch"
-# )
+# After Harmony: embedding coloured by batch
+sc.pl.embedding(
+    adata,
+    basis="X_pca_harmony",
+    color="batch",
+    title="PCA after Harmony (coloured by batch)",
+    save="_pca_after_harmony.png",
+)
 
 # Constructing the neighborhood graph using the Harmony-corrected PCA embeddings
 sc.pp.neighbors(adata, use_rep="X_pca_harmony")
 sc.tl.umap(adata)
 
-# Visualize the UMAP colored by batch to check if the batch effect has been mitigated
-# sc.pl.umap(
-#     adata,
-#     color="batch",
-#     # Setting a smaller point size to get prevent overlap
-#     size=2,
-# )
+# UMAP coloured by batch, check batch effect is reduced
+sc.pl.umap(
+    adata,
+    color="batch",
+    size=2,
+    title="UMAP coloured by batch (after Harmony)",
+    save="_umap_batch.png",
+)
 
-
-
-
-
-
-
-
-
-
+# UMAP coloured by cell type, sanity check using ground-truth labels
+sc.pl.umap(
+    adata,
+    color="cell_type",
+    title="UMAP coloured by cell type",
+    save="_umap_cell_type.png",
+)
 
 
 ## 3. Clustering
 print("Running clustering...")
 
-# Method: Leiden algorithm (The modern standard)
-# We test multiple resolutions to benchmark how it affects the number of clusters (as seen on slide 35)
+sc.tl.leiden(adata, resolution=0.25, key_added="leiden_res_0.25", flavor="igraph", directed=False, n_iterations=2)
+sc.tl.leiden(adata, resolution=0.5,  key_added="leiden_res_0.50", flavor="igraph", directed=False, n_iterations=2)
+sc.tl.leiden(adata, resolution=1.0,  key_added="leiden_res_1.00", flavor="igraph", directed=False, n_iterations=2)
 
-sc.tl.leiden(adata, resolution=0.25, key_added="leiden_res_0.25")
-sc.tl.leiden(adata, resolution=0.5, key_added="leiden_res_0.50")
-sc.tl.leiden(adata, resolution=1.0, key_added="leiden_res_1.00")
-
-# Visualize the clustering results side-by-side on the UMAP for your benchmark report
+# Visualize the clustering results side-by-side on the UMAP
 sc.pl.umap(
     adata,
     color=["leiden_res_0.25", "leiden_res_0.50", "leiden_res_1.00"],
     wspace=0.4,
-    title=["Leiden (Res=0.25)", "Leiden (Res=0.50)", "Leiden (Res=1.0)"]
+    title=["Leiden (Res=0.25)", "Leiden (Res=0.50)", "Leiden (Res=1.0)"],
+    save="_leiden_comparison.png",
 )
 
 
+sc3_cluster(adata, k_range=range(4, 8), n_subsample=2000, basis='X_pca_harmony', random_state=42)
+
+sc.pl.umap(
+    adata,
+    color=['sc3_k5', 'sc3_k6', 'leiden_res_0.50'],
+    wspace=0.4,
+    title=['SC3 (k=5)', 'SC3 (k=6)', 'Leiden (Res=0.50)'],
+    save='_sc3_vs_leiden.png',
+)
+
+sc3_benchmark_plot(adata, k_range=range(4, 8), leiden_key='leiden_res_0.50',
+                   basis='X_pca_harmony', save='figures/sc3_benchmark.png')
 
 
-
-
-
-
-
-
-
-
-
-
-
-## 4. Cluster Interpretation (Finding meaning in the presence of noise)
+## 4. Cluster Interpretation
 print("Running Differential Gene Expression to find marker genes...")
 
-# Let's proceed with the Leiden algorithm at 0.50 resolution for our interpretation
 chosen_cluster_key = "leiden_res_0.50"
 
-# Rank genes to find cluster-specific marker genes
-# 'wilcoxon' is the standard non-parametric statistical test used for this
 sc.tl.rank_genes_groups(
     adata,
     groupby=chosen_cluster_key,
     method="wilcoxon",
-    use_raw=False
+    use_raw=False,
 )
 
-# 4a. Visualize the top 5 marker genes for each cluster using a Dotplot
-# Dotplots are excellent for interpreting clusters (as shown on slide 36)
-# It shows both the mean expression (color) and fraction of cells expressing the gene (dot size)
+# Dotplot: top 5 marker genes per cluster, using readable gene symbols
 sc.pl.rank_genes_groups_dotplot(
     adata,
     n_genes=5,
     groupby=chosen_cluster_key,
-    standard_scale="var", # Scales expression between 0 and 1 for easier visual comparison
-    title="Top 5 Marker Genes per Cluster"
+    gene_symbols="feature_name",
+    standard_scale="var",
+    title="Top 5 Marker Genes per Cluster",
+    save="_dotplot_marker_genes.png",
 )
 
-# 4b. Extract the marker genes into a DataFrame to investigate biologically
-# Let's say you want to look at the top markers for Cluster '0'
+# Print top 10 markers for cluster 0 with readable names
 cluster_0_markers = sc.get.rank_genes_groups_df(adata, group="0")
+cluster_0_markers["gene_symbol"] = (
+    adata.var.loc[cluster_0_markers["names"], "feature_name"].values
+)
 
 print("\n--- Top 10 marker genes for Cluster 0 ---")
-print(cluster_0_markers.head(10))
-
-# Note for your assignment report:
-# Once you have these gene lists, you would typically look them up in biological databases
-# (like CellMarker or literature) to say "Cluster 0 is highly expressing CD14, so it is a Monocyte."
+print(cluster_0_markers[["gene_symbol", "names", "scores", "logfoldchanges", "pvals_adj"]].head(10))
