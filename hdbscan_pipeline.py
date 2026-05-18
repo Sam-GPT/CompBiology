@@ -82,7 +82,7 @@ sc.pp.neighbors(adata, use_rep="X_pca_harmony")
 sc.tl.umap(adata)
 
 
-## 3. Clustering — HDBSCAN
+## 3. Clustering: HDBSCAN
 print("Running HDBSCAN clustering...")
 
 # HDBSCAN runs directly on the Harmony-corrected PCA embedding (first 20 PCs)
@@ -90,9 +90,9 @@ print("Running HDBSCAN clustering...")
 # and uneven lobe sizes are handled correctly.
 embedding = adata.obsm["X_pca_harmony"][:, :20]
 
-# Benchmark three values of min_cluster_size (the primary tuning knob)
+# Benchmark three values of min_cluster_size (the primary tuning knob).
 # Larger values -> fewer, broader clusters
-#   smaller -> more, finer clusters
+#       smaller -> more, finer clusters
 HDBSCAN_PARAMS = [
     {"min_cluster_size": 50,  "min_samples": 10, "key": "hdbscan_mcs50"},
     {"min_cluster_size": 100, "min_samples": 10, "key": "hdbscan_mcs100"},
@@ -132,7 +132,43 @@ chosen_cluster_key = "hdbscan_mcs100"
 adata_clean = adata[adata.obs[chosen_cluster_key] != "Noise"].copy()
 
 
-## 4. Cluster Interpretation
+## 4. Quantitative Benchmark Metrics
+print("Computing quantitative benchmark metrics...")
+from sklearn.metrics import (
+    silhouette_score,
+    davies_bouldin_score,
+    adjusted_rand_score,
+    normalized_mutual_info_score,
+)
+
+# All metrics run on adata_clean (noise excluded)
+embed  = adata_clean.obsm["X_pca_harmony"][:, :20]
+labels = adata_clean.obs[chosen_cluster_key].astype("category").cat.codes.values
+
+# Silhouette and Davies-Bouldin: subsample to 5000 cells max for speed
+sample_size = min(5000, len(labels))
+sil = silhouette_score(embed, labels, sample_size=sample_size, random_state=42)
+db  = davies_bouldin_score(embed, labels)
+
+# ARI and NMI vs Leiden: run Leiden on adata_clean at three resolutions
+for res in [0.25, 0.5, 1.0]:
+    sc.tl.leiden(adata_clean, resolution=res, key_added=f"leiden_res_{res}")
+
+print(f"\n{'Metric':<30} {'Value':>10}")
+print("-" * 42)
+print(f"{'Silhouette Score':<30} {sil:>10.4f}  (higher = better, range [-1,1])")
+print(f"{'Davies-Bouldin Score':<30} {db:>10.4f}  (lower = better, range [0,∞))")
+
+print(f"\n{'Leiden Resolution':<20} {'# Leiden':<12} {'# HDBSCAN':<12} {'ARI':>8} {'NMI':>8}")
+print("-" * 62)
+for res in [0.25, 0.5, 1.0]:
+    leiden_labels = adata_clean.obs[f"leiden_res_{res}"].astype(str)
+    ari = adjusted_rand_score(leiden_labels, adata_clean.obs[chosen_cluster_key].astype(str))
+    nmi = normalized_mutual_info_score(leiden_labels, adata_clean.obs[chosen_cluster_key].astype(str))
+    print(f"{res:<20} {leiden_labels.nunique():<12} {adata_clean.obs[chosen_cluster_key].nunique():<12} {ari:>8.4f} {nmi:>8.4f}")
+
+
+## 5. Cluster Interpretation
 print("Running Differential Gene Expression to find marker genes...")
 
 sc.tl.rank_genes_groups(
@@ -155,10 +191,10 @@ print("\n--- Top 10 marker genes for Cluster 0 ---")
 print(cluster_0_markers.head(10))
 
 
-## 5. Cell Type Composition by Region
+## 6. Cell Type Composition by Region
 print("Generating composition plot...")
 
-# Cross-tabulate region (group) vs DBSCAN cluster
+# Cross-tabulate region (group) vs HDBSCAN cluster
 # normalize per row so each bar sums to 1 and regions with
 #  different cell counts are directly comparable.
 composition = pd.crosstab(
@@ -176,12 +212,12 @@ plt.tight_layout()
 plt.show()
 
 
-## 6. UMAP separated by Region
+## 7. UMAP separated by Region
 print("Generating comparative UMAPs...")
 sc.pl.umap(adata_clean, color=[chosen_cluster_key, 'group'], wspace=0.4)
 
 
-## 7. Gene Expression by Cluster AND Region (Using Auto-Discovered Markers)
+## 8. Gene Expression by Cluster AND Region (Using Auto-Discovered Markers)
 print("Generating comparative dotplot...")
 
 # Concatenate cluster label and region so each bar represents one cluster/region
@@ -218,7 +254,7 @@ sc.pl.dotplot(
 )
 
 
-## 8. Global DGE: Anterior vs Posterior
+## 9. Global DGE: Anterior vs Posterior
 print("Running DGE between anterior and posterior regions...")
 
 sc.tl.rank_genes_groups(
