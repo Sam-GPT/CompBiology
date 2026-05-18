@@ -160,17 +160,17 @@ print("Running clustering...")
 # Method: Leiden algorithm (The modern standard)
 # We test multiple resolutions to benchmark how it affects the number of clusters (as seen on slide 35)
 
-# sc.tl.leiden(adata, resolution=0.25, key_added="leiden_res_0.25")
-# sc.tl.leiden(adata, resolution=0.5, key_added="leiden_res_0.50")
-# sc.tl.leiden(adata, resolution=1.0, key_added="leiden_res_1.00")
+sc.tl.leiden(adata, resolution=0.25, key_added="leiden_res_0.25")
+sc.tl.leiden(adata, resolution=0.5, key_added="leiden_res_0.50")
+sc.tl.leiden(adata, resolution=1.0, key_added="leiden_res_1.00")
 
-# # Visualize the clustering results side-by-side on the UMAP for your benchmark report
-# sc.pl.umap(
-#     adata,
-#     color=["leiden_res_0.25", "leiden_res_0.50", "leiden_res_1.00"],
-#     wspace=0.4,
-#     title=["Leiden (Res=0.25)", "Leiden (Res=0.50)", "Leiden (Res=1.0)"]
-# )
+# Visualize the clustering results side-by-side on the UMAP for your benchmark report
+sc.pl.umap(
+    adata,
+    color=["leiden_res_0.25", "leiden_res_0.50", "leiden_res_1.00"],
+    wspace=0.4,
+    title=["Leiden (Res=0.25)", "Leiden (Res=0.50)", "Leiden (Res=1.0)"]
+)
 
 
 
@@ -199,8 +199,36 @@ to_plot = [g for g in confirmed_markers if g in adata.var['feature_name'].values
 
 
 
+print("Running Differential Gene Expression to find marker genes...")
 
-## 4. Cluster Interpretation (Finding meaning in the presence of noise)
+chosen_cluster_key = "leiden_res_0.50"
+
+# Rank genes to find cluster-specific marker genes
+sc.tl.rank_genes_groups(
+    adata,
+    groupby=chosen_cluster_key,
+    method="wilcoxon",
+    use_raw=False
+)
+
+sc.pl.rank_genes_groups_dotplot(
+    adata,
+    n_genes=5,
+    groupby=chosen_cluster_key,
+    standard_scale="var", 
+    gene_symbols="feature_name",  
+    title="Top 5 Marker Genes per Cluster"
+)
+
+cluster_0_markers = sc.get.rank_genes_groups_df(adata, group="0")
+
+
+
+
+
+
+
+# 4. Cluster Interpretation (Finding meaning in the presence of noise)
 print("Running Differential Gene Expression to find marker genes...")
 
 
@@ -297,9 +325,12 @@ sil = silhouette_score(embed, labels, sample_size=min(5000, len(labels)))
 
 db = davies_bouldin_score(embed, labels)
 
+leiden_labels = adata.obs["leiden_res_0.50"].astype(str).values
 true_labels = adata.obs["cell_type"].astype(str).values
-ari = adjusted_rand_score(true_labels, adata.obs["scDFC_cluster"].astype(str).values)
-print(f"Metrics -> Silhouette: {sil:.4f}, Davies-Bouldin: {db:.4f}, ARI: {ari:.4f}")
+leiden_scDFC_ari = adjusted_rand_score(leiden_labels, adata.obs["scDFC_cluster"].astype(str).values)
+trueLabel_scDFC_ari = adjusted_rand_score(true_labels, adata.obs["scDFC_cluster"].astype(str).values)
+
+print(f"Metrics -> Silhouette: {sil:.4f}, Davies-Bouldin: {db:.4f}, ARI(Leiden vs scDFC): {leiden_scDFC_ari:.4f}, ARI(True vs scDFC): {trueLabel_scDFC_ari:.4f}")
 
 
 
