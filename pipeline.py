@@ -1,13 +1,20 @@
+import os
+
 import giniclust3
+import numpy as np
 import scanpy as sc
 import pandas as pd
 import matplotlib.pyplot as plt
 import scanpy.external as sce
 import harmonypy as hm
 from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score, davies_bouldin_score, adjusted_rand_score
 
 sc.settings.verbosity = 3
 sc.settings.set_figure_params(dpi=150, facecolor='white')
+
+os.makedirs("output", exist_ok=True)
+sc.settings.figdir = "output"
 
 
 # Read in the data
@@ -290,4 +297,131 @@ sc.pl.umap(
     palette={'Zeldzaam': 'red', 'Gewoon': 'lightgrey'}
 )
 
-print("Benchmark complete!")
+## 6. Differential Gene Expression per algorithm
+# Wilcoxon DGE on K-Means and GiniClust3 labels so each algorithm gets its own
+# marker-gene interpretation (previously only Leiden had DGE).
+
+print("\nRunning DGE on K-Means clusters...")
+sc.tl.rank_genes_groups(adata, groupby="kmeans", method="wilcoxon", use_raw=False)
+sc.tl.dendrogram(adata, groupby="kmeans", use_rep="X_pca_harmony")
+sc.pl.rank_genes_groups_dotplot(
+    adata,
+    n_genes=5,
+    groupby="kmeans",
+    standard_scale="var",
+    title="Top 5 Marker Genes per K-Means Cluster",
+    save="kmeans_markers.png",
+)
+
+print("\nRunning DGE on GiniClust3 clusters...")
+# GiniClust3 produces some very small clusters (rare cells); Wilcoxon fails on
+# clusters with <3 cells, so drop those before DGE.
+_gini_sizes = adata.obs["giniclust"].value_counts()
+_valid_gini = _gini_sizes[_gini_sizes >= 3].index.tolist()
+adata_gini_dge = adata[adata.obs["giniclust"].isin(_valid_gini)].copy()
+adata_gini_dge.obs["giniclust"] = adata_gini_dge.obs["giniclust"].cat.remove_unused_categories()
+sc.tl.rank_genes_groups(adata_gini_dge, groupby="giniclust", method="wilcoxon", use_raw=False)
+sc.tl.dendrogram(adata_gini_dge, groupby="giniclust", use_rep="X_pca_harmony")
+sc.pl.rank_genes_groups_dotplot(
+    adata_gini_dge,
+    n_genes=5,
+    groupby="giniclust",
+    standard_scale="var",
+    title="Top 5 Marker Genes per GiniClust3 Cluster",
+    save="giniclust_markers.png",
+)
+
+
+## 7. Cell Type Composition: Anterior vs Posterior Hippocampus
+# Stacked bar of cluster proportions per region, one figure per algorithm.
+
+for alg_col, alg_name, fname in [
+    ("kmeans", "K-Means", "composition_kmeans_anterior_vs_posterior.png"),
+    ("giniclust", "GiniClust3", "composition_giniclust_anterior_vs_posterior.png"),
+]:
+    composition = pd.crosstab(
+        adata.obs["group"], adata.obs[alg_col], normalize="index"
+    )
+    fig, ax = plt.subplots(figsize=(10, 6))
+    composition.plot(kind="bar", stacked=True, ax=ax)
+    ax.set_title(f"Cell Type Composition: Anterior vs Posterior Hippocampus ({alg_name})")
+    ax.set_xlabel("Region")
+    ax.set_ylabel("Proportion of Cells")
+    ax.legend(title=f"{alg_name} Cluster", bbox_to_anchor=(1.05, 1), loc="upper left")
+    plt.tight_layout()
+    plt.savefig(f"output/{fname}", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved output/{fname}")
+
+
+## 8. Regional DGE: Anterior vs Posterior
+# Globally compare anterior vs posterior cells, ignoring clustering.
+
+print("\nRunning regional DGE (anterior vs posterior)...")
+sc.tl.rank_genes_groups(adata, groupby="group", method="wilcoxon", use_raw=False)
+sc.pl.rank_genes_groups_dotplot(
+    adata,
+    n_genes=25,
+    groupby="group",
+    title="Top Regional Differences: Anterior vs Posterior",
+    save="anterior_vs_posterior_dge.png",
+)
+
+
+## 9. Quantitative Benchmark Metrics
+# Silhouette + Davies-Bouldin + ARI vs Leiden on Harmony-corrected PCA.
+
+print("\nComputing benchmark metrics (silhouette, Davies-Bouldin, ARI vs Leiden)...")
+embed = adata.obsm["X_pca_harmony"]
+leiden_ref = adata.obs["leiden_res_0.50"].astype(str).astype("category").cat.codes.values
+
+bench_rows = []
+for name, col in [
+    ("Leiden (res=0.50)", "leiden_res_0.50"),
+    ("K-Means", "kmeans"),
+    ("GiniClust3", "giniclust"),
+]:
+    labels = adata.obs[col].astype(str).astype("category").cat.codes.values
+    n_clusters = len(np.unique(labels))
+    if n_clusters < 2:
+        print(f"  Skipping {name}: only {n_clusters} cluster(s)")
+        continue
+    sample_size = min(5000, len(labels))
+    sil = silhouette_score(embed, labels, sample_size=sample_size)
+    db = davies_bouldin_score(embed, labels)
+    ari = adjusted_rand_score(leiden_ref, labels)
+    bench_rows.append({
+        "method": name,
+        "n_clusters": n_clusters,
+        "silhouette": round(sil, 4),
+        "davies_bouldin": round(db, 4),
+        "ari_vs_leiden": round(ari, 4),
+    })
+
+bench_df = pd.DataFrame(bench_rows)
+print("\n=== Benchmark Metrics ===")
+print(bench_df.to_string(index=False))
+
+# Grouped bar chart: one panel per metric, best value highlighted.
+fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+metric_specs = [
+    ("silhouette", "Silhouette score\n(higher = better)", "max"),
+    ("davies_bouldin", "Davies-Bouldin index\n(lower = better)", "min"),
+    ("ari_vs_leiden", "ARI vs Leiden\n(higher = better)", "max"),
+]
+methods = bench_df["method"].tolist()
+for ax, (metric, title, best_dir) in zip(axes, metric_specs):
+    values = bench_df[metric].values
+    bars = ax.bar(methods, values, color="#4292c6")
+    best_idx = int(values.argmax() if best_dir == "max" else values.argmin())
+    bars[best_idx].set_color("#fd8d3c")
+    ax.set_title(title, fontsize=10)
+    ax.tick_params(axis="x", rotation=20, labelsize=8)
+    ax.spines[["top", "right"]].set_visible(False)
+fig.suptitle("K-Means / GiniClust3 / Leiden — clustering benchmark", fontsize=12, y=1.02)
+plt.tight_layout()
+plt.savefig("output/benchmark_kmeans_giniclust.png", dpi=150, bbox_inches="tight")
+plt.close(fig)
+print("Saved output/benchmark_kmeans_giniclust.png")
+
+print("\nBenchmark complete!")
