@@ -311,7 +311,8 @@ def sc3_cluster(
 # ---------------------------------------------------------------------------
 
 def sc3_benchmark_metrics(adata, k_range, leiden_key: str = 'leiden_res_0.50',
-                            basis: str = 'X_pca_harmony') -> pd.DataFrame:
+                            basis: str = 'X_pca_harmony',
+                            truth_key: str = 'cell_type') -> pd.DataFrame:
     """
     Compute clustering quality metrics for each SC3 k and for Leiden.
 
@@ -321,10 +322,16 @@ def sc3_benchmark_metrics(adata, k_range, leiden_key: str = 'leiden_res_0.50',
     silhouette    : higher is better (max 1.0).
     davies_bouldin: lower is better.
     ari_vs_leiden : Adjusted Rand Index vs Leiden (1.0 = identical).
+    ari_vs_truth  : Adjusted Rand Index vs ground-truth cell_type labels.
+                    NaN if truth_key is absent from adata.obs.
     """
     embed = adata.obsm[basis]
     rows = []
     leiden_lbl = None
+    truth_lbl = None
+
+    if truth_key in adata.obs.columns:
+        truth_lbl = adata.obs[truth_key].astype(str).astype('category').cat.codes.values
 
     # Leiden reference row
     if leiden_key in adata.obs.columns:
@@ -333,12 +340,14 @@ def sc3_benchmark_metrics(adata, k_range, leiden_key: str = 'leiden_res_0.50',
         sample_size = min(5000, len(leiden_lbl))
         sil = silhouette_score(embed, leiden_lbl, sample_size=sample_size)
         db  = davies_bouldin_score(embed, leiden_lbl)
+        ari_truth = adjusted_rand_score(truth_lbl, leiden_lbl) if truth_lbl is not None else np.nan
         rows.append({
             'method': f'Leiden ({leiden_key})',
             'n_clusters': n_leiden,
             'silhouette': round(sil, 4),
             'davies_bouldin': round(db, 4),
             'ari_vs_leiden': 1.0,
+            'ari_vs_truth': round(ari_truth, 4) if not np.isnan(ari_truth) else np.nan,
         })
 
     # SC3 rows
@@ -352,12 +361,14 @@ def sc3_benchmark_metrics(adata, k_range, leiden_key: str = 'leiden_res_0.50',
         sil = silhouette_score(embed, sc3_lbl, sample_size=sample_size)
         db  = davies_bouldin_score(embed, sc3_lbl)
         ari = adjusted_rand_score(leiden_lbl, sc3_lbl) if leiden_lbl is not None else np.nan
+        ari_truth = adjusted_rand_score(truth_lbl, sc3_lbl) if truth_lbl is not None else np.nan
         rows.append({
             'method': f'SC3 (k={k})',
             'n_clusters': n_unique,
             'silhouette': round(sil, 4),
             'davies_bouldin': round(db, 4),
             'ari_vs_leiden': round(ari, 4),
+            'ari_vs_truth': round(ari_truth, 4) if not np.isnan(ari_truth) else np.nan,
         })
 
     return pd.DataFrame(rows)
@@ -374,7 +385,7 @@ def sc3_benchmark_plot(adata, k_range, leiden_key: str = 'leiden_res_0.50',
     print("\n=== Benchmark Metrics ===")
     print(df.to_string(index=False))
 
-    fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+    fig, axes = plt.subplots(1, 4, figsize=(18, 4))
     colors = ['#d95f02' if 'Leiden' in m else '#1b7837' for m in df['method']]
     methods = df['method'].tolist()
 
@@ -382,6 +393,7 @@ def sc3_benchmark_plot(adata, k_range, leiden_key: str = 'leiden_res_0.50',
         ('silhouette',    'Silhouette score\n(higher = better)',    'max'),
         ('davies_bouldin','Davies-Bouldin index\n(lower = better)', 'min'),
         ('ari_vs_leiden', 'ARI vs Leiden\n(1.0 = identical)',       'max'),
+        ('ari_vs_truth',  'ARI vs ground truth\n(higher = better)', 'max'),
     ]
 
     for ax, (col, label, better) in zip(axes, specs):
