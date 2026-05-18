@@ -307,11 +307,12 @@ sc.pl.rank_genes_groups_dotplot(
 
 
 ## 9. Quantitative Benchmark Metrics
-# Silhouette + Davies-Bouldin + ARI vs Leiden on Harmony-corrected PCA.
+# Silhouette + Davies-Bouldin + ARI vs Leiden + ARI vs ground truth on Harmony-corrected PCA.
 
-print("\nComputing benchmark metrics (silhouette, Davies-Bouldin, ARI vs Leiden)...")
+print("\nComputing benchmark metrics (silhouette, Davies-Bouldin, ARI vs Leiden, ARI vs truth)...")
 embed = adata.obsm["X_pca_harmony"]
 leiden_ref = adata.obs["leiden_res_0.50"].astype(str).astype("category").cat.codes.values
+truth_ref = adata.obs["cell_type"].astype(str).astype("category").cat.codes.values
 
 bench_rows = []
 for name, col in [
@@ -327,12 +328,14 @@ for name, col in [
     sil = silhouette_score(embed, labels, sample_size=sample_size)
     db = davies_bouldin_score(embed, labels)
     ari = adjusted_rand_score(leiden_ref, labels)
+    ari_truth = adjusted_rand_score(truth_ref, labels)
     bench_rows.append({
         "method": name,
         "n_clusters": n_clusters,
         "silhouette": round(sil, 4),
         "davies_bouldin": round(db, 4),
         "ari_vs_leiden": round(ari, 4),
+        "ari_vs_truth": round(ari_truth, 4),
     })
 
 bench_df = pd.DataFrame(bench_rows)
@@ -340,11 +343,12 @@ print("\n=== Benchmark Metrics ===")
 print(bench_df.to_string(index=False))
 
 # Grouped bar chart: one panel per metric, best value highlighted.
-fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+fig, axes = plt.subplots(1, 4, figsize=(19, 4))
 metric_specs = [
     ("silhouette", "Silhouette score\n(higher = better)", "max"),
     ("davies_bouldin", "Davies-Bouldin index\n(lower = better)", "min"),
     ("ari_vs_leiden", "ARI vs Leiden\n(higher = better)", "max"),
+    ("ari_vs_truth", "ARI vs ground truth\n(higher = better)", "max"),
 ]
 methods = bench_df["method"].tolist()
 for ax, (metric, title, best_dir) in zip(axes, metric_specs):
