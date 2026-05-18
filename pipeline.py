@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import scanpy.external as sce
 import harmonypy as hm
 import os
+from sklearn.metrics import silhouette_score, davies_bouldin_score, adjusted_rand_score
 
 
 
@@ -14,7 +15,7 @@ sc.settings.set_figure_params(dpi=150, facecolor='white')
 # Read in the data
 adata = sc.read_h5ad('data.h5ad')
 
-# Limit to 30K cells
+# Limit to 3K cells
 adata = adata[:3000, :].copy()
 
 print("Variable columns:", adata.var.columns)
@@ -285,6 +286,20 @@ sc.pl.rank_genes_groups_dotplot(
     save="_anterior_vs_posterior.png",
     show=False
 )
+
+# Clustering Benchmarks
+
+embed = adata.obsm["X_pca_harmony"]
+
+labels = adata.obs["scDFC_cluster"].astype("category").cat.codes.values
+
+sil = silhouette_score(embed, labels, sample_size=min(5000, len(labels)))
+
+db = davies_bouldin_score(embed, labels)
+
+true_labels = adata.obs["cell_type"].astype(str).values
+ari = adjusted_rand_score(true_labels, adata.obs["scDFC_cluster"].astype(str).values)
+print(f"Metrics -> Silhouette: {sil:.4f}, Davies-Bouldin: {db:.4f}, ARI: {ari:.4f}")
 
 
 
