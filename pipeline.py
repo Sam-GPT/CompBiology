@@ -1,6 +1,6 @@
 import os
 
-import giniclust3
+# Note: GiniClust3 was prototyped but excluded from the unified benchmark. See git history.
 import numpy as np
 import scanpy as sc
 import pandas as pd
@@ -11,6 +11,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score, davies_bouldin_score, adjusted_rand_score
 
 sc.settings.verbosity = 3
+sc.settings.autoshow = False
 sc.settings.set_figure_params(dpi=150, facecolor='white')
 
 os.makedirs("output", exist_ok=True)
@@ -19,6 +20,11 @@ sc.settings.figdir = "output"
 
 # Read in the data
 adata = sc.read_h5ad('data.h5ad')
+
+# CellxGene stores log-normalized values in .X and raw integer counts in .raw.X.
+# Swap so the pipeline's normalize_total + log1p + seurat_v3 HVG step works on raw counts.
+adata.X = adata.raw.X.copy()
+adata.raw = None
 
 # Limit to 30K cells
 adata = adata[:30000, :].copy()
@@ -83,9 +89,6 @@ sc.pp.highly_variable_genes(
     flavor="seurat_v3",
     layer="counts",
 )
-
-# Save the full dataset (with all genes) before subsetting, specifically for GiniClust3
-adata_full = adata.copy()
 
 adata = adata[:, adata.var["highly_variable"]].copy()
 
@@ -154,9 +157,9 @@ print("Running clustering...")
 # Method: Leiden algorithm (The modern standard)
 # We test multiple resolutions to benchmark how it affects the number of clusters (as seen on slide 35)
 
-sc.tl.leiden(adata, resolution=0.25, key_added="leiden_res_0.25")
-sc.tl.leiden(adata, resolution=0.5, key_added="leiden_res_0.50")
-sc.tl.leiden(adata, resolution=1.0, key_added="leiden_res_1.00")
+sc.tl.leiden(adata, resolution=0.25, key_added="leiden_res_0.25", flavor="igraph", directed=False, n_iterations=2)
+sc.tl.leiden(adata, resolution=0.5,  key_added="leiden_res_0.50", flavor="igraph", directed=False, n_iterations=2)
+sc.tl.leiden(adata, resolution=1.0,  key_added="leiden_res_1.00", flavor="igraph", directed=False, n_iterations=2)
 
 # Visualize the clustering results side-by-side on the UMAP for your benchmark report
 sc.pl.umap(
@@ -194,6 +197,7 @@ sc.tl.rank_genes_groups(
     method="wilcoxon",
     use_raw=False
 )
+sc.tl.dendrogram(adata, groupby=chosen_cluster_key, use_rep="X_pca_harmony")
 
 # 4a. Visualize the top 5 marker genes for each cluster using a Dotplot
 # Dotplots are excellent for interpreting clusters (as shown on slide 36)
@@ -203,7 +207,8 @@ sc.pl.rank_genes_groups_dotplot(
     n_genes=5,
     groupby=chosen_cluster_key,
     standard_scale="var", # Scales expression between 0 and 1 for easier visual comparison
-    title="Top 5 Marker Genes per Cluster"
+    title="Top 5 Marker Genes per Cluster",
+    save="leiden_markers.png",
 )
 
 # 4b. Extract the marker genes into a DataFrame to investigate biologically
@@ -238,50 +243,10 @@ adata.obs['kmeans'] = adata.obs['kmeans'].astype('category')
 
 
 # ================================================================================
-# ALGORITHM 2: GiniClust3 (Rare Cell Type Detection)
-# ================================================================================
-print("\nRunning GiniClust3 for rare cell type detection benchmark...")
-
-from giniclust3 import gini
-import scipy.sparse
-
-# Use 'adata_full' (saved before HVG filtering) so rare genes are not lost
-adata_gini = adata_full.copy()
-adata_gini.X = adata_gini.layers["counts"].copy()
-
-# Unpack sparse matrix to dense array for GiniClust3 to avoid length errors
-if scipy.sparse.issparse(adata_gini.X):
-    adata_gini.X = adata_gini.X.toarray()
-
-print("Calculating Gini Index (This might take a minute)...")
-gini.calGini(adata_gini)
-
-
-print("Clustering based on high Gini genes...")
-adata_gini = gini.clusterGini(adata_gini)
-
-adata.obs['giniclust'] = adata_gini.obs['leiden'].values.astype('category')
-
-# ================================================================================
 # FINAL BENCHMARK PLOT
 # ================================================================================
 
-# --- GiniClust3: label zeldzame cellen ---
-# Tel hoeveel cellen per GiniClust3-cluster
-cluster_sizes = adata.obs['giniclust'].value_counts()
-
-# Clusters met minder dan 50 cellen = zeldzaam
-rare_clusters = cluster_sizes[cluster_sizes < 50].index
-
-# Nieuwe kolom: 'Zeldzaam' of 'Gewoon'
-adata.obs['giniclust_rare'] = adata.obs['giniclust'].apply(
-    lambda x: 'Zeldzaam' if x in rare_clusters else 'Gewoon'
-).astype('category')
-
-print(f"Aantal zeldzame cellen: {(adata.obs['giniclust_rare'] == 'Zeldzaam').sum()}")
-print(f"Aantal gewone cellen:   {(adata.obs['giniclust_rare'] == 'Gewoon').sum()}")
-
-# Plot Leiden en K-Means samen
+# Plot Leiden and K-Means side by side on the UMAP
 sc.pl.umap(
     adata,
     color=["leiden_res_0.50", "kmeans"],
@@ -289,17 +254,9 @@ sc.pl.umap(
     title=["Leiden (Graph)", "K-Means (Distance)"]
 )
 
-# Plot GiniClust3 apart (met eigen kleurenpalet)
-sc.pl.umap(
-    adata,
-    color="giniclust_rare",
-    title="GiniClust3: Zeldzame vs. Gewone cellen",
-    palette={'Zeldzaam': 'red', 'Gewoon': 'lightgrey'}
-)
-
-## 6. Differential Gene Expression per algorithm
-# Wilcoxon DGE on K-Means and GiniClust3 labels so each algorithm gets its own
-# marker-gene interpretation (previously only Leiden had DGE).
+## 6. Differential Gene Expression on K-Means clusters
+# Wilcoxon DGE so K-Means gets its own marker-gene interpretation
+# (Section 4 above already produces this for Leiden).
 
 print("\nRunning DGE on K-Means clusters...")
 sc.tl.rank_genes_groups(adata, groupby="kmeans", method="wilcoxon", use_raw=False)
@@ -313,31 +270,12 @@ sc.pl.rank_genes_groups_dotplot(
     save="kmeans_markers.png",
 )
 
-print("\nRunning DGE on GiniClust3 clusters...")
-# GiniClust3 produces some very small clusters (rare cells); Wilcoxon fails on
-# clusters with <3 cells, so drop those before DGE.
-_gini_sizes = adata.obs["giniclust"].value_counts()
-_valid_gini = _gini_sizes[_gini_sizes >= 3].index.tolist()
-adata_gini_dge = adata[adata.obs["giniclust"].isin(_valid_gini)].copy()
-adata_gini_dge.obs["giniclust"] = adata_gini_dge.obs["giniclust"].cat.remove_unused_categories()
-sc.tl.rank_genes_groups(adata_gini_dge, groupby="giniclust", method="wilcoxon", use_raw=False)
-sc.tl.dendrogram(adata_gini_dge, groupby="giniclust", use_rep="X_pca_harmony")
-sc.pl.rank_genes_groups_dotplot(
-    adata_gini_dge,
-    n_genes=5,
-    groupby="giniclust",
-    standard_scale="var",
-    title="Top 5 Marker Genes per GiniClust3 Cluster",
-    save="giniclust_markers.png",
-)
-
 
 ## 7. Cell Type Composition: Anterior vs Posterior Hippocampus
-# Stacked bar of cluster proportions per region, one figure per algorithm.
+# Stacked bar of K-Means cluster proportions per region.
 
 for alg_col, alg_name, fname in [
     ("kmeans", "K-Means", "composition_kmeans_anterior_vs_posterior.png"),
-    ("giniclust", "GiniClust3", "composition_giniclust_anterior_vs_posterior.png"),
 ]:
     composition = pd.crosstab(
         adata.obs["group"], adata.obs[alg_col], normalize="index"
@@ -379,7 +317,6 @@ bench_rows = []
 for name, col in [
     ("Leiden (res=0.50)", "leiden_res_0.50"),
     ("K-Means", "kmeans"),
-    ("GiniClust3", "giniclust"),
 ]:
     labels = adata.obs[col].astype(str).astype("category").cat.codes.values
     n_clusters = len(np.unique(labels))
@@ -418,10 +355,10 @@ for ax, (metric, title, best_dir) in zip(axes, metric_specs):
     ax.set_title(title, fontsize=10)
     ax.tick_params(axis="x", rotation=20, labelsize=8)
     ax.spines[["top", "right"]].set_visible(False)
-fig.suptitle("K-Means / GiniClust3 / Leiden — clustering benchmark", fontsize=12, y=1.02)
+fig.suptitle("K-Means vs Leiden — clustering benchmark", fontsize=12, y=1.02)
 plt.tight_layout()
-plt.savefig("output/benchmark_kmeans_giniclust.png", dpi=150, bbox_inches="tight")
+plt.savefig("output/benchmark_kmeans.png", dpi=150, bbox_inches="tight")
 plt.close(fig)
-print("Saved output/benchmark_kmeans_giniclust.png")
+print("Saved output/benchmark_kmeans.png")
 
 print("\nBenchmark complete!")
