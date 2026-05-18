@@ -6,8 +6,9 @@ import harmonypy as hm
 import hdbscan
 import numpy as np
 
-sc.settings.verbosity = 3
-sc.settings.set_figure_params(dpi=150, facecolor='white')
+sc.settings.verbosity = 0
+sc.settings.autoshow = False
+sc.set_figure_params(dpi=150, facecolor='white')
 
 
 # Read in the data
@@ -123,6 +124,7 @@ sc.pl.umap(
     color=[p["key"] for p in HDBSCAN_PARAMS],
     wspace=0.4,
     title=[f"HDBSCAN (mcs={p['min_cluster_size']})" for p in HDBSCAN_PARAMS],
+    save="_HFigure_1_hdbscan_benchmark.png",
 )
 
 # Choose the best parameterisation for downstream analysis
@@ -157,7 +159,7 @@ for res in [0.25, 0.5, 1.0]:
 print(f"\n{'Metric':<30} {'Value':>10}")
 print("-" * 42)
 print(f"{'Silhouette Score':<30} {sil:>10.4f}  (higher = better, range [-1,1])")
-print(f"{'Davies-Bouldin Score':<30} {db:>10.4f}  (lower = better, range [0,∞))")
+print(f"{'Davies-Bouldin Score':<30} {db:>10.4f}  (lower = better, range [0,inf))")
 
 print(f"\n{'Leiden Resolution':<20} {'# Leiden':<12} {'# HDBSCAN':<12} {'ARI':>8} {'NMI':>8}")
 print("-" * 62)
@@ -184,6 +186,7 @@ sc.pl.rank_genes_groups_dotplot(
     groupby=chosen_cluster_key,
     standard_scale="var",
     title="Top 5 Marker Genes per Cluster (HDBSCAN)",
+    save="_HFigure_2_marker_genes.png",
 )
 
 cluster_0_markers = sc.get.rank_genes_groups_df(adata_clean, group="0")
@@ -209,12 +212,18 @@ plt.xlabel('Region (group)')
 plt.ylabel('Proportion of Cells')
 plt.legend(title='HDBSCAN Cluster', bbox_to_anchor=(1.05, 1), loc='upper left')
 plt.tight_layout()
-plt.show()
+plt.savefig("figures/HFigure_3_composition.png", dpi=150, bbox_inches="tight")
+plt.close()
 
 
 ## 7. UMAP separated by Region
 print("Generating comparative UMAPs...")
-sc.pl.umap(adata_clean, color=[chosen_cluster_key, 'group'], wspace=0.4)
+sc.pl.umap(
+    adata_clean,
+    color=[chosen_cluster_key, 'group'],
+    wspace=0.4,
+    save="_HFigure_4_umap_cluster_region.png",
+)
 
 
 ## 8. Gene Expression by Cluster AND Region (Using Auto-Discovered Markers)
@@ -251,6 +260,7 @@ sc.pl.dotplot(
     gene_symbols='feature_name',
     standard_scale='var',
     title="Top Auto-Discovered Markers by Cluster and Region (HDBSCAN)",
+    save="_HFigure_5_markers_by_cluster_region.png",
 )
 
 
@@ -269,4 +279,5 @@ sc.pl.rank_genes_groups_dotplot(
     n_genes=25,
     gene_symbols='feature_name',
     title="Top Regional Differences: Anterior vs Posterior (HDBSCAN)",
+    save="_HFigure_6_regional_dge.png",
 )
