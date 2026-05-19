@@ -15,8 +15,8 @@ print("Reading data from 'data.h5ad'...", end='\t')
 adata = sc.read_h5ad('data.h5ad')
 print("Done")
 
-# Limit to 50K cells
-adata = adata[:50000, :].copy()
+# Random subsample to 50K cells (seed for reproducibility)
+sc.pp.subsample(adata, n_obs=50000, random_state=42)
 
 
 ## 1. Normalize / Preprocess
