@@ -3,11 +3,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import scanpy.external as sce
 import harmonypy as hm
-from sklearn.cluster import DBSCAN
+import hdbscan
 import numpy as np
 
-sc.settings.verbosity = 3
-sc.settings.set_figure_params(dpi=150, facecolor='white')
+sc.settings.verbosity = 0
+sc.settings.autoshow = False
+sc.set_figure_params(dpi=150, facecolor='white')
 
 
 # Read in the data
@@ -82,48 +83,95 @@ sc.pp.neighbors(adata, use_rep="X_pca_harmony")
 sc.tl.umap(adata)
 
 
-## 3. Clustering: DBSCAN
-print("Running DBSCAN clustering...")
+## 3. Clustering: HDBSCAN
+print("Running HDBSCAN clustering...")
 
-# Run on the 2D UMAP embedding rather than PCA
-# the UMAP separates the visible lobes cleanly
-#  so distances are uniform and a single eps works globally
-embedding = adata.obsm["X_umap"]   # shape: (n_cells, 2)
+# HDBSCAN runs directly on the Harmony-corrected PCA embedding (first 20 PCs)
+# Unlike DBSCAN it adapts density locally, so no single global eps is needed
+# and uneven lobe sizes are handled correctly.
+embedding = adata.obsm["X_pca_harmony"][:, :20]
 
-DBSCAN_PARAMS = [
-    {"eps": 0.3, "min_samples": 10, "key": "dbscan_eps0.3"},
-    {"eps": 0.5, "min_samples": 10, "key": "dbscan_eps0.5"},
-    {"eps": 0.8, "min_samples": 10, "key": "dbscan_eps0.8"},
+# Benchmark three values of min_cluster_size (the primary tuning knob).
+# Larger values -> fewer, broader clusters
+#       smaller -> more, finer clusters
+HDBSCAN_PARAMS = [
+    {"min_cluster_size": 50,  "min_samples": 10, "key": "hdbscan_mcs50"},
+    {"min_cluster_size": 100, "min_samples": 10, "key": "hdbscan_mcs100"},
+    {"min_cluster_size": 200, "min_samples": 10, "key": "hdbscan_mcs200"},
 ]
 
-for params in DBSCAN_PARAMS:
-    print(f"\tRunning DBSCAN (eps={params['eps']}, min_samples={params['min_samples']})...")
-    db = DBSCAN(eps=params["eps"], min_samples=params["min_samples"], n_jobs=-1)
-    labels = db.fit_predict(embedding)
+for params in HDBSCAN_PARAMS:
+    print(f"\tRunning HDBSCAN (min_cluster_size={params['min_cluster_size']}, "
+          f"min_samples={params['min_samples']})...")
+    clusterer = hdbscan.HDBSCAN(
+        min_cluster_size=params["min_cluster_size"],
+        min_samples=params["min_samples"],
+        core_dist_n_jobs=-1,
+    )
+    labels = clusterer.fit_predict(embedding)
 
     str_labels = np.where(labels == -1, "Noise", labels.astype(str))
     adata.obs[params["key"]] = pd.Categorical(str_labels)
 
     n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
     n_noise    = (labels == -1).sum()
-    print(f"\t  -> {n_clusters} clusters found, {n_noise} noise points ({n_noise/len(labels)*100:.1f}%)")
+    print(f"\t  → {n_clusters} clusters found, {n_noise} noise points "
+          f"({n_noise / len(labels) * 100:.1f}%)")
 
 # Visualize the three parameterisations side by side
 sc.pl.umap(
     adata,
-    color=[p["key"] for p in DBSCAN_PARAMS],
+    color=[p["key"] for p in HDBSCAN_PARAMS],
     wspace=0.4,
-    title=[f"DBSCAN (eps={p['eps']})" for p in DBSCAN_PARAMS],
+    title=[f"HDBSCAN (mcs={p['min_cluster_size']})" for p in HDBSCAN_PARAMS],
+    save="_HFigure_1_hdbscan_benchmark.png",
 )
 
 # Choose the best parameterisation for downstream analysis
-chosen_cluster_key = "dbscan_eps0.5"
+chosen_cluster_key = "hdbscan_mcs100"
 
-# Noise cells confuse rank_genes_groups — work on a clean subset for DGE
+# Noise cells confuse rank_genes_groups, work on a clean subset for DGE
 adata_clean = adata[adata.obs[chosen_cluster_key] != "Noise"].copy()
 
 
-## 4. Cluster Interpretation
+## 4. Quantitative Benchmark Metrics
+print("Computing quantitative benchmark metrics...")
+from sklearn.metrics import (
+    silhouette_score,
+    davies_bouldin_score,
+    adjusted_rand_score,
+    normalized_mutual_info_score,
+)
+
+# All metrics run on adata_clean (noise excluded)
+embed  = adata_clean.obsm["X_pca_harmony"][:, :20]
+labels = adata_clean.obs[chosen_cluster_key].astype("category").cat.codes.values
+
+# Silhouette and Davies-Bouldin: subsample to 5000 cells max for speed
+sample_size = min(5000, len(labels))
+sil = silhouette_score(embed, labels, sample_size=sample_size, random_state=42)
+db  = davies_bouldin_score(embed, labels)
+
+# ARI and NMI vs Leiden: run Leiden on adata_clean at three resolutions
+for res in [0.25, 0.5, 1.0]:
+    sc.tl.leiden(adata_clean, resolution=res, key_added=f"leiden_res_{res}")
+
+print(f"\n{'Metric':<30} {'Value':>10}")
+print("-" * 42)
+print(f"{'Silhouette Score':<30} {sil:>10.4f}  (higher = better, range [-1,1])")
+print(f"{'Davies-Bouldin Score':<30} {db:>10.4f}  (lower = better, range [0,inf))")
+
+print(f"\n{'Leiden Resolution':<20} {'# Leiden':<12} {'# HDBSCAN':<12} {'ARI vs Leiden':>8} {'NMI vs Ground Truth':>8}")
+print("-" * 62)
+for res in [0.25, 0.5, 1.0]:
+    leiden_labels = adata_clean.obs[f"leiden_res_{res}"].astype(str)
+    truth_ref = adata.obs["cell_type"].astype(str).astype("category").cat.codes.values
+    ari_vs_leiden = adjusted_rand_score(leiden_labels, adata_clean.obs[chosen_cluster_key].astype(str))
+    ari_vs_truth = adjusted_rand_score(leiden_labels, adata_clean.obs[chosen_cluster_key].astype(str))
+    print(f"{res:<20} {leiden_labels.nunique():<12} {adata_clean.obs[chosen_cluster_key].nunique():<12} {ari_vs_leiden:>8.4f} {ari_vs_truth:>8.4f}")
+
+
+## 5. Cluster Interpretation
 print("Running Differential Gene Expression to find marker genes...")
 
 sc.tl.rank_genes_groups(
@@ -138,7 +186,8 @@ sc.pl.rank_genes_groups_dotplot(
     n_genes=5,
     groupby=chosen_cluster_key,
     standard_scale="var",
-    title="Top 5 Marker Genes per Cluster (DBSCAN)",
+    title="Top 5 Marker Genes per Cluster (HDBSCAN)",
+    save="_HFigure_2_marker_genes.png",
 )
 
 cluster_0_markers = sc.get.rank_genes_groups_df(adata_clean, group="0")
@@ -146,10 +195,10 @@ print("\n--- Top 10 marker genes for Cluster 0 ---")
 print(cluster_0_markers.head(10))
 
 
-## 5. Cell Type Composition by Region
+## 6. Cell Type Composition by Region
 print("Generating composition plot...")
 
-# Cross-tabulate region (group) vs DBSCAN cluster
+# Cross-tabulate region (group) vs HDBSCAN cluster
 # normalize per row so each bar sums to 1 and regions with
 #  different cell counts are directly comparable.
 composition = pd.crosstab(
@@ -162,17 +211,23 @@ ax = composition.plot(kind='bar', stacked=True, figsize=(10, 6))
 plt.title('Cell Type Composition: Anterior vs Posterior Hippocampus')
 plt.xlabel('Region (group)')
 plt.ylabel('Proportion of Cells')
-plt.legend(title='DBSCAN Cluster', bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.legend(title='HDBSCAN Cluster', bbox_to_anchor=(1.05, 1), loc='upper left')
 plt.tight_layout()
-plt.show()
+plt.savefig("figures/HFigure_3_composition.png", dpi=150, bbox_inches="tight")
+plt.close()
 
 
-## 6. UMAP separated by Region
+## 7. UMAP separated by Region
 print("Generating comparative UMAPs...")
-sc.pl.umap(adata_clean, color=[chosen_cluster_key, 'group'], wspace=0.4)
+sc.pl.umap(
+    adata_clean,
+    color=[chosen_cluster_key, 'group'],
+    wspace=0.4,
+    save="_HFigure_4_umap_cluster_region.png",
+)
 
 
-## 7. Gene Expression by Cluster AND Region (Using Auto-Discovered Markers)
+## 8. Gene Expression by Cluster AND Region (Using Auto-Discovered Markers)
 print("Generating comparative dotplot...")
 
 # Concatenate cluster label and region so each bar represents one cluster/region
@@ -205,11 +260,12 @@ sc.pl.dotplot(
     groupby='cluster_region',
     gene_symbols='feature_name',
     standard_scale='var',
-    title="Top Auto-Discovered Markers by Cluster and Region (DBSCAN)",
+    title="Top Auto-Discovered Markers by Cluster and Region (HDBSCAN)",
+    save="_HFigure_5_markers_by_cluster_region.png",
 )
 
 
-## 8. Global DGE: Anterior vs Posterior
+## 9. Global DGE: Anterior vs Posterior
 print("Running DGE between anterior and posterior regions...")
 
 sc.tl.rank_genes_groups(
@@ -223,6 +279,6 @@ sc.pl.rank_genes_groups_dotplot(
     adata_clean,
     n_genes=25,
     gene_symbols='feature_name',
-    title="Top Regional Differences: Anterior vs Posterior (DBSCAN)",
+    title="Top Regional Differences: Anterior vs Posterior (HDBSCAN)",
+    save="_HFigure_6_regional_dge.png",
 )
-
