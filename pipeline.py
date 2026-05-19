@@ -26,9 +26,9 @@ sc.settings._root_logger.addFilter(_DropSaveFigMsg())
 # ─────────────────────────────────────────────────────────────────────────────
 # Read in the data
 # ─────────────────────────────────────────────────────────────────────────────
-# Full CellxGene h5ad has 130k cells × 17k genes; we subsample to 10k for runtime.
+# Full CellxGene h5ad has 130k cells × 17k genes; we subsample to 50k for runtime.
 # feature_name (gene symbols) and group/batch obs columns are already present.
-adata = load_h5ad_data('703771a1-236f-4eda-9c04-318d882e149b.h5ad', n_cells=10000)
+adata = load_h5ad_data('703771a1-236f-4eda-9c04-318d882e149b.h5ad', n_cells=50000)
 
 
 ## 1. Normalize / Preprocess
