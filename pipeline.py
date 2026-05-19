@@ -229,7 +229,7 @@ cluster_0_markers = sc.get.rank_genes_groups_df(adata, group="0")
 
 
 # 4. Cluster Interpretation (Finding meaning in the presence of noise)
-print("Running Differential Gene Expression to find marker genes...")
+print("Running DGE on scDFC clusters...")
 
 
 sc.tl.rank_genes_groups(
@@ -316,21 +316,64 @@ sc.pl.rank_genes_groups_dotplot(
 )
 
 # Clustering Benchmarks
+# Silhouette + Davies-Bouldin + ARI vs Leiden + ARI vs ground truth on Harmony-corrected PCA.
+# Reports Leiden as a reference row so scDFC's numbers can be compared head-to-head.
 
+print("\nComputing benchmark metrics (silhouette, Davies-Bouldin, ARI vs Leiden, ARI vs truth)...")
 embed = adata.obsm["X_pca_harmony"]
+leiden_ref = adata.obs["leiden_res_0.50"].astype(str).astype("category").cat.codes.values
+truth_ref = adata.obs["cell_type"].astype(str).astype("category").cat.codes.values
 
-labels = adata.obs["scDFC_cluster"].astype("category").cat.codes.values
+bench_rows = []
+for name, col in [
+    ("Leiden (res=0.50)", "leiden_res_0.50"),
+    ("scDFC", "scDFC_cluster"),
+]:
+    labels = adata.obs[col].astype(str).astype("category").cat.codes.values
+    n_clusters = len(set(labels))
+    if n_clusters < 2:
+        print(f"  Skipping {name}: only {n_clusters} cluster(s)")
+        continue
+    sample_size = min(5000, len(labels))
+    sil = silhouette_score(embed, labels, sample_size=sample_size)
+    db = davies_bouldin_score(embed, labels)
+    ari_leiden = adjusted_rand_score(leiden_ref, labels)
+    ari_truth = adjusted_rand_score(truth_ref, labels)
+    bench_rows.append({
+        "method": name,
+        "n_clusters": n_clusters,
+        "silhouette": round(sil, 4),
+        "davies_bouldin": round(db, 4),
+        "ari_vs_leiden": round(ari_leiden, 4),
+        "ari_vs_truth": round(ari_truth, 4),
+    })
 
-sil = silhouette_score(embed, labels, sample_size=min(5000, len(labels)))
+bench_df = pd.DataFrame(bench_rows)
+print("\n=== Benchmark Metrics ===")
+print(bench_df.to_string(index=False))
 
-db = davies_bouldin_score(embed, labels)
-
-leiden_labels = adata.obs["leiden_res_0.50"].astype(str).values
-true_labels = adata.obs["cell_type"].astype(str).values
-leiden_scDFC_ari = adjusted_rand_score(leiden_labels, adata.obs["scDFC_cluster"].astype(str).values)
-trueLabel_scDFC_ari = adjusted_rand_score(true_labels, adata.obs["scDFC_cluster"].astype(str).values)
-
-print(f"Metrics -> Silhouette: {sil:.4f}, Davies-Bouldin: {db:.4f}, ARI(Leiden vs scDFC): {leiden_scDFC_ari:.4f}, ARI(True vs scDFC): {trueLabel_scDFC_ari:.4f}")
+# Grouped bar chart: one panel per metric, best value highlighted.
+fig, axes = plt.subplots(1, 4, figsize=(19, 4))
+metric_specs = [
+    ("silhouette", "Silhouette score\n(higher = better)", "max"),
+    ("davies_bouldin", "Davies-Bouldin index\n(lower = better)", "min"),
+    ("ari_vs_leiden", "ARI vs Leiden\n(higher = better)", "max"),
+    ("ari_vs_truth", "ARI vs ground truth\n(higher = better)", "max"),
+]
+methods = bench_df["method"].tolist()
+for ax, (metric, title, best_dir) in zip(axes, metric_specs):
+    values = bench_df[metric].values
+    bars = ax.bar(methods, values, color="#4292c6")
+    best_idx = int(values.argmax() if best_dir == "max" else values.argmin())
+    bars[best_idx].set_color("#fd8d3c")
+    ax.set_title(title, fontsize=10)
+    ax.tick_params(axis="x", rotation=20, labelsize=8)
+    ax.spines[["top", "right"]].set_visible(False)
+fig.suptitle("scDFC vs Leiden — clustering benchmark", fontsize=12, y=1.02)
+plt.tight_layout()
+plt.savefig("figures/benchmark_scDFC.png", dpi=150, bbox_inches="tight")
+plt.close(fig)
+print("Saved figures/benchmark_scDFC.png")
 
 
 
