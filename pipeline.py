@@ -1,73 +1,77 @@
-import scanpy as sc
-import pandas as pd
+"""
+Leiden clustering pipeline — main branch.
+
+Leiden is treated as a first-class algorithm in the cross-branch benchmark.
+Sweeps three resolutions (0.25, 0.5, 1.0), reports silhouette, Davies-Bouldin,
+and ARI vs ground-truth cell_type for each. Downstream analysis (DGE,
+composition, regional) uses Leiden res=0.50 as the chosen resolution.
+"""
+
+import logging
+import os
+
 import matplotlib.pyplot as plt
-import scanpy.external as sce
+import pandas as pd
+import scanpy as sc
 import harmonypy as hm
+from sklearn.metrics import silhouette_score, davies_bouldin_score, adjusted_rand_score
+from load_data import load_h5ad_data
 
-
+os.makedirs("figures", exist_ok=True)
 
 sc.settings.verbosity = 3
+sc.settings.autoshow = False
 sc.settings.set_figure_params(dpi=150, facecolor='white')
 
 
-# Read in the data
-adata = sc.read_h5ad('data.h5ad')
+class _DropSaveFigMsg(logging.Filter):
+    def filter(self, record):
+        return "saving figure to file" not in record.getMessage()
 
-# Limit to 30K cells
-adata = adata[:30000, :].copy()
+
+sc.settings._root_logger.addFilter(_DropSaveFigMsg())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Read in the data
+# ─────────────────────────────────────────────────────────────────────────────
+# Random subsample to 50K cells (seeded for reproducibility) to match team standard.
+adata = load_h5ad_data('703771a1-236f-4eda-9c04-318d882e149b.h5ad', n_cells=50000)
 
 
 ## 1. Normalize / Preprocess
 
-# Annotate gene populations
-# mitochondrial genes, "MT-" for human, "Mt-" for mouse
-adata.var["mt"] = adata.var["feature_name"].str.upper().str.startswith("MT-")
-# ribosomal genes
+# Annotate gene populations using readable gene symbols
+adata.var["mt"]   = adata.var["feature_name"].str.upper().str.startswith("MT-")
 adata.var["ribo"] = adata.var["feature_name"].str.upper().str.startswith(("RPS", "RPL"))
-# hemoglobin genes
-adata.var["hb"] = adata.var["feature_name"].str.upper().str.contains("^HB[^(P)]")
-
-
+adata.var["hb"]   = adata.var["feature_name"].str.upper().str.contains("^HB[^(P)]")
 
 # Calculate QC metrics
 sc.pp.calculate_qc_metrics(adata, qc_vars=["mt", "ribo", "hb"], inplace=True, log1p=True)
 
-
 # Visualize QC metrics
-# n_genes_by_counts: Number of genes detected in a cell
-# total_counts: Total number of molecules (UMIs) in a cell
-# pct_counts_mt: Percentage of mitochondrial genes in a cell
-# sc.pl.violin(
-#     adata,
-#     ["n_genes_by_counts", "total_counts", "pct_counts_mt"],
-#     jitter=0.4,
-#     multi_panel=True,
-# )
+sc.pl.violin(
+    adata,
+    ["n_genes_by_counts", "total_counts", "pct_counts_mt"],
+    jitter=0.4,
+    multi_panel=True,
+    save="_qc_metrics.png",
+)
 
-# Filter cells
-sc.pp.filter_cells(adata, min_genes=200) # Keeps only cells that express at least 200 genes
-sc.pp.filter_genes(adata, min_cells=3) # Keeps only genes that are expressed in at least 3 cells
+# Filter cells — 200 is the standard 10x Genomics QC floor.
+sc.pp.filter_cells(adata, min_genes=200)
+sc.pp.filter_genes(adata, min_cells=3)
 
-
-# Doublet Detection
-sc.pp.scrublet(adata, batch_key="batch") # doublet: which are multiple cells captured in one droplet.
-
-# Visualize doublet scores and predicted doublets
-# sc.pl.umap(adata, color=["doublet_score", "predicted_doublet"])
-
-adata = adata[adata.obs["doublet_score"] < 0.56].copy()
+# Doublet Detection — works correctly because load_h5ad_data swapped .X for raw counts.
+sc.pp.scrublet(adata, batch_key="batch")
+adata = adata[~adata.obs["predicted_doublet"]].copy()
 
 # Normalization and Feature Selection
-
-# Saving count data
 adata.layers["counts"] = adata.X.copy()
-
-# Normalizing to median total counts
 sc.pp.normalize_total(adata)
-# Logarithmize the data
 sc.pp.log1p(adata)
 
-# Identify 2,000 highly variable genes (HVGs)
+# Identify highly variable genes from raw counts (seurat_v3 expects integer counts).
 sc.pp.highly_variable_genes(
     adata,
     n_top_genes=2000,
@@ -80,129 +84,221 @@ sc.pp.highly_variable_genes(
 adata = adata[:, adata.var["highly_variable"]].copy()
 
 
-
 ## 2. Batch Effect Correction
 
 # Dimensionality reduction using PCA
 sc.tl.pca(adata, svd_solver="arpack")
 
+# PCA variance plot
+sc.pl.pca_variance_ratio(adata, n_pcs=50, log=True, save="_pca_variance.png")
 
-# Visualizes how much variance the first 50 PCA dimensions explain (on a log scale)
-# sc.pl.pca_variance_ratio(adata, n_pcs=50, log=True)
+Z = adata.obsm["X_pca"]
 
-
-
-Z = adata.obsm["X_pca"]   # (9769, 50)
-
-# run harmony directly
-ho = hm.run_harmony(
-    Z,
-    adata.obs,
-    vars_use=["batch"]
-)
-
-# correct orientation fix
+# Run Harmony batch correction
+ho = hm.run_harmony(Z, adata.obs, vars_use=["batch"])
 adata.obsm["X_pca_harmony"] = ho.Z_corr.T
 
+# Before Harmony: PCA coloured by batch
+sc.pl.pca(
+    adata,
+    color="batch",
+    title="PCA before Harmony (coloured by batch)",
+    save="_pca_before_harmony.png",
+)
 
-# # Before Harmony Batch correction (Plotting the PCA colored by batch to see the batch effect)
-# sc.pl.pca(adata, color="batch")
+# After Harmony: embedding coloured by batch
+sc.pl.embedding(
+    adata,
+    basis="X_pca_harmony",
+    color="batch",
+    title="PCA after Harmony (coloured by batch)",
+    save="_pca_after_harmony.png",
+)
 
-# # After Harmony Batch correction (Plotting the Harmony-corrected PCA colored by batch to see if the batch effect is reduced)
-# sc.pl.embedding(
-#     adata,
-#     basis="X_pca_harmony",
-#     color="batch"
-# )
-
-# Constructing the neighborhood graph using the Harmony-corrected PCA embeddings
+# Construct neighborhood graph on Harmony-corrected PCA
 sc.pp.neighbors(adata, use_rep="X_pca_harmony")
 sc.tl.umap(adata)
 
-# Visualize the UMAP colored by batch to check if the batch effect has been mitigated
-# sc.pl.umap(
-#     adata,
-#     color="batch",
-#     # Setting a smaller point size to get prevent overlap
-#     size=2,
-# )
+# UMAP coloured by batch — sanity check for batch effect removal
+sc.pl.umap(
+    adata,
+    color="batch",
+    size=2,
+    title="UMAP coloured by batch (after Harmony)",
+    save="_umap_batch.png",
+)
+
+# UMAP coloured by cell type — sanity check using ground-truth labels
+sc.pl.umap(
+    adata,
+    color="cell_type",
+    title="UMAP coloured by cell type",
+    save="_umap_cell_type.png",
+)
 
 
+## 3. Clustering: Leiden at three resolutions
 
+print("Running Leiden clustering at three resolutions...")
+sc.tl.leiden(adata, resolution=0.25, key_added="leiden_res_0.25", flavor="igraph", directed=False, n_iterations=2)
+sc.tl.leiden(adata, resolution=0.5,  key_added="leiden_res_0.50", flavor="igraph", directed=False, n_iterations=2)
+sc.tl.leiden(adata, resolution=1.0,  key_added="leiden_res_1.00", flavor="igraph", directed=False, n_iterations=2)
 
-
-
-
-
-
-
-
-
-## 3. Clustering
-print("Running clustering...")
-
-# Method: Leiden algorithm (The modern standard)
-# We test multiple resolutions to benchmark how it affects the number of clusters (as seen on slide 35)
-
-sc.tl.leiden(adata, resolution=0.25, key_added="leiden_res_0.25")
-sc.tl.leiden(adata, resolution=0.5, key_added="leiden_res_0.50")
-sc.tl.leiden(adata, resolution=1.0, key_added="leiden_res_1.00")
-
-# Visualize the clustering results side-by-side on the UMAP for your benchmark report
+# Side-by-side UMAP of the three resolutions
 sc.pl.umap(
     adata,
     color=["leiden_res_0.25", "leiden_res_0.50", "leiden_res_1.00"],
     wspace=0.4,
-    title=["Leiden (Res=0.25)", "Leiden (Res=0.50)", "Leiden (Res=1.0)"]
+    title=["Leiden (Res=0.25)", "Leiden (Res=0.50)", "Leiden (Res=1.0)"],
+    save="_leiden_comparison.png",
 )
 
 
+## 4. Quantitative Benchmark Metrics
+# Silhouette + Davies-Bouldin + ARI vs ground-truth cell_type for each Leiden resolution.
+# (ARI vs Leiden would be trivially 1.0 against itself, so we skip that column.)
+
+print("\nComputing Leiden benchmark metrics (silhouette, Davies-Bouldin, ARI vs truth)...")
+embed = adata.obsm["X_pca_harmony"]
+truth_ref = adata.obs["cell_type"].astype(str).astype("category").cat.codes.values
+
+bench_rows = []
+for res_str in ["0.25", "0.50", "1.00"]:
+    col = f"leiden_res_{res_str}"
+    labels = adata.obs[col].astype(int).values
+    n_clusters = len(set(labels))
+    sample_size = min(5000, len(labels))
+    sil = silhouette_score(embed, labels, sample_size=sample_size)
+    db = davies_bouldin_score(embed, labels)
+    ari_truth = adjusted_rand_score(truth_ref, labels)
+    bench_rows.append({
+        "method": f"Leiden (res={res_str})",
+        "n_clusters": n_clusters,
+        "silhouette": round(sil, 4),
+        "davies_bouldin": round(db, 4),
+        "ari_vs_truth": round(ari_truth, 4),
+    })
+
+bench_df = pd.DataFrame(bench_rows)
+print("\n=== Benchmark Metrics ===")
+print(bench_df.to_string(index=False))
+
+# 3-panel bar chart, best value highlighted in orange.
+fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+metric_specs = [
+    ("silhouette", "Silhouette score\n(higher = better)", "max"),
+    ("davies_bouldin", "Davies-Bouldin index\n(lower = better)", "min"),
+    ("ari_vs_truth", "ARI vs ground truth\n(higher = better)", "max"),
+]
+methods = bench_df["method"].tolist()
+for ax, (metric, title, best_dir) in zip(axes, metric_specs):
+    values = bench_df[metric].values
+    bars = ax.bar(methods, values, color="#4292c6")
+    best_idx = int(values.argmax() if best_dir == "max" else values.argmin())
+    bars[best_idx].set_color("#fd8d3c")
+    ax.set_title(title, fontsize=10)
+    ax.tick_params(axis="x", rotation=20, labelsize=8)
+    ax.spines[["top", "right"]].set_visible(False)
+fig.suptitle("Leiden — clustering benchmark across resolutions", fontsize=12, y=1.02)
+plt.tight_layout()
+plt.savefig("figures/leiden_benchmark.png", dpi=150, bbox_inches="tight")
+plt.close(fig)
+print("Saved figures/leiden_benchmark.png")
 
 
+## 5. Cluster Interpretation — DGE on the chosen Leiden resolution
 
-
-
-
-
-
-
-
-
-
-
-## 4. Cluster Interpretation (Finding meaning in the presence of noise)
-print("Running Differential Gene Expression to find marker genes...")
-
-# Let's proceed with the Leiden algorithm at 0.50 resolution for our interpretation
+print("\nRunning Differential Gene Expression on Leiden res=0.50...")
 chosen_cluster_key = "leiden_res_0.50"
 
-# Rank genes to find cluster-specific marker genes
-# 'wilcoxon' is the standard non-parametric statistical test used for this
 sc.tl.rank_genes_groups(
     adata,
     groupby=chosen_cluster_key,
     method="wilcoxon",
-    use_raw=False
+    use_raw=False,
 )
 
-# 4a. Visualize the top 5 marker genes for each cluster using a Dotplot
-# Dotplots are excellent for interpreting clusters (as shown on slide 36)
-# It shows both the mean expression (color) and fraction of cells expressing the gene (dot size)
+sc.tl.dendrogram(adata, groupby=chosen_cluster_key, use_rep="X_pca_harmony")
+
 sc.pl.rank_genes_groups_dotplot(
     adata,
     n_genes=5,
     groupby=chosen_cluster_key,
-    standard_scale="var", # Scales expression between 0 and 1 for easier visual comparison
-    title="Top 5 Marker Genes per Cluster"
+    gene_symbols="feature_name",
+    standard_scale="var",
+    title="Top 5 Marker Genes per Leiden Cluster",
+    save="marker_genes.png",
 )
 
-# 4b. Extract the marker genes into a DataFrame to investigate biologically
-# Let's say you want to look at the top markers for Cluster '0'
+# Print top 10 markers for cluster 0 with readable names
 cluster_0_markers = sc.get.rank_genes_groups_df(adata, group="0")
+cluster_0_markers["gene_symbol"] = (
+    adata.var.loc[cluster_0_markers["names"], "feature_name"].values
+)
 
 print("\n--- Top 10 marker genes for Cluster 0 ---")
-print(cluster_0_markers.head(10))
+print(cluster_0_markers[["gene_symbol", "names", "scores", "logfoldchanges", "pvals_adj"]].head(10))
 
-# Note for your assignment report:
-# Once you have these gene lists, you would typically look them up in biological databases
-# (like CellMarker or literature) to say "Cluster 0 is highly expressing CD14, so it is a Monocyte."
+
+## 6. Cell Type Composition: Anterior vs Posterior Hippocampus
+
+CLUSTER_COL = "leiden_res_0.50"
+
+print("\nGenerating composition plot...")
+composition = pd.crosstab(adata.obs["group"], adata.obs[CLUSTER_COL], normalize="index")
+ax = composition.plot(kind="bar", stacked=True, figsize=(10, 6))
+plt.title("Cell Type Composition: Anterior vs Posterior Hippocampus")
+plt.xlabel("Region (group)")
+plt.ylabel("Proportion of Cells")
+plt.legend(title="Leiden Cluster (res=0.50)",
+           bbox_to_anchor=(1.05, 1), loc="upper left")
+plt.tight_layout()
+plt.savefig("figures/composition_anterior_vs_posterior.png", dpi=150, bbox_inches="tight")
+plt.close()
+
+
+## 7. UMAP separated by Region
+print("Generating comparative UMAPs...")
+sc.pl.umap(adata, color=[CLUSTER_COL, "group"], wspace=0.4, save="_leiden_vs_region.png")
+
+
+## 8. Gene Expression by Cluster AND Region
+# Reuses the Leiden DGE results from Section 5 (must run before Section 9, which overwrites them).
+print("Generating comparative dotplot...")
+adata.obs["cluster_region"] = (
+    adata.obs[CLUSTER_COL].astype(str) + "_" + adata.obs["group"].astype(str)
+)
+
+dge_result = adata.uns["rank_genes_groups"]["names"]
+top_markers = []
+for cluster_name in dge_result.dtype.names:
+    top_markers.extend(dge_result[cluster_name][:5])
+top_markers = list(dict.fromkeys(top_markers))  # deduplicate, preserve order
+
+marker_symbols = adata.var.loc[top_markers, "feature_name"].tolist()
+
+sc.pl.dotplot(
+    adata,
+    var_names=marker_symbols,
+    groupby="cluster_region",
+    gene_symbols="feature_name",
+    standard_scale="var",
+    title=f"Top Auto-Discovered Markers by Cluster and Region ({CLUSTER_COL})",
+    save="marker_by_cluster_region.png",
+)
+
+
+## 9. Global DGE: Anterior vs Posterior
+# Overwrites adata.uns['rank_genes_groups'] with the region-keyed DGE.
+print("\nRunning DGE between anterior and posterior regions...")
+sc.tl.rank_genes_groups(adata, groupby="group", method="wilcoxon", use_raw=False)
+
+sc.pl.rank_genes_groups_dotplot(
+    adata,
+    n_genes=25,
+    gene_symbols="feature_name",
+    title="Top Regional Differences: Anterior vs Posterior",
+    save="anterior_vs_posterior_dge.png",
+)
+
+print("\nLeiden pipeline complete.")
