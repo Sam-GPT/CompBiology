@@ -1,0 +1,192 @@
+[load_data] Reading 703771a1-236f-4eda-9c04-318d882e149b.h5ad ...
+[load_data]   Full shape: 129905 cells x 17131 genes
+[load_data]   Replaced .X with raw integer counts from .raw.X
+[load_data]   Subsampled to 50000 cells (seed=42).
+[load_data]   'group': {'posterior': np.int64(25289), 'anterior': np.int64(24711)}
+[load_data]   'batch': ['Batch2', 'Batch3', 'Batch5', 'Batch6']
+
+[load_data] AnnData ready: 50000 cells x 17131 genes
+            obs columns : ['orig.ident', 'nCount_RNA', 'nFeature_RNA', 'percent.mt', 'group', 'epilepsy_duration', 'batch', 'donor_id', 'seurat_clusters', 'epilepsy_frequency']...
+filtered out 73 cells that have less than 200 genes expressed
+filtered out 568 genes that are detected in less than 3 cells
+Running Scrublet
+filtered out 1752 genes that are detected in less than 3 cells
+normalizing counts per cell
+    finished (0:00:00)
+extracting highly variable genes
+    finished (0:00:00)
+--> added
+    'highly_variable', boolean vector (adata.var)
+    'means', float vector (adata.var)
+    'dispersions', float vector (adata.var)
+    'dispersions_norm', float vector (adata.var)
+normalizing counts per cell
+    finished (0:00:00)
+normalizing counts per cell
+    finished (0:00:00)
+Embedding transcriptomes using PCA...
+    using data matrix X directly
+Automatically set threshold at doublet score = 0.49
+Detected doublet rate = 0.0%
+Estimated detectable doublet fraction = 5.2%
+Overall doublet rate:
+        Expected   = 5.0%
+        Estimated  = 0.5%
+filtered out 1293 genes that are detected in less than 3 cells
+normalizing counts per cell
+    finished (0:00:00)
+extracting highly variable genes
+    finished (0:00:00)
+--> added
+    'highly_variable', boolean vector (adata.var)
+    'means', float vector (adata.var)
+    'dispersions', float vector (adata.var)
+    'dispersions_norm', float vector (adata.var)
+normalizing counts per cell
+    finished (0:00:00)
+normalizing counts per cell
+    finished (0:00:00)
+Embedding transcriptomes using PCA...
+    using data matrix X directly
+Automatically set threshold at doublet score = 0.61
+Detected doublet rate = 0.0%
+Estimated detectable doublet fraction = 0.2%
+Overall doublet rate:
+        Expected   = 5.0%
+        Estimated  = 0.0%
+filtered out 2142 genes that are detected in less than 3 cells
+normalizing counts per cell
+    finished (0:00:00)
+extracting highly variable genes
+    finished (0:00:00)
+--> added
+    'highly_variable', boolean vector (adata.var)
+    'means', float vector (adata.var)
+    'dispersions', float vector (adata.var)
+    'dispersions_norm', float vector (adata.var)
+normalizing counts per cell
+    finished (0:00:00)
+normalizing counts per cell
+    finished (0:00:00)
+Embedding transcriptomes using PCA...
+    using data matrix X directly
+Automatically set threshold at doublet score = 0.37
+Detected doublet rate = 0.0%
+Estimated detectable doublet fraction = 0.2%
+Overall doublet rate:
+        Expected   = 5.0%
+        Estimated  = 15.4%
+filtered out 104 genes that are detected in less than 3 cells
+normalizing counts per cell
+    finished (0:00:00)
+extracting highly variable genes
+    finished (0:00:00)
+--> added
+    'highly_variable', boolean vector (adata.var)
+    'means', float vector (adata.var)
+    'dispersions', float vector (adata.var)
+    'dispersions_norm', float vector (adata.var)
+normalizing counts per cell
+    finished (0:00:00)
+normalizing counts per cell
+    finished (0:00:00)
+Embedding transcriptomes using PCA...
+    using data matrix X directly
+Automatically set threshold at doublet score = 0.75
+Detected doublet rate = 0.0%
+Estimated detectable doublet fraction = 3.6%
+Overall doublet rate:
+        Expected   = 5.0%
+        Estimated  = 0.6%
+    Scrublet finished (0:03:32)
+normalizing counts per cell
+    finished (0:00:00)
+extracting highly variable genes
+--> added
+    'highly_variable', boolean vector (adata.var)
+    'highly_variable_rank', float vector (adata.var)
+    'means', float vector (adata.var)
+    'variances', float vector (adata.var)
+    'variances_norm', float vector (adata.var)
+computing PCA
+    with n_comps=50
+    finished (0:00:02)
+2026-05-19 18:46:49,262 - harmonypy - INFO - Computing initial centroids with sklearn.KMeans...
+2026-05-19 18:46:53,114 - harmonypy - INFO - sklearn.KMeans initialization complete.
+2026-05-19 18:46:53,254 - harmonypy - INFO - Iteration 1 of 10
+2026-05-19 18:47:00,045 - harmonypy - INFO - Iteration 2 of 10
+2026-05-19 18:47:06,852 - harmonypy - INFO - Iteration 3 of 10
+2026-05-19 18:47:13,622 - harmonypy - INFO - Iteration 4 of 10
+2026-05-19 18:47:20,436 - harmonypy - INFO - Iteration 5 of 10
+2026-05-19 18:47:27,439 - harmonypy - INFO - Iteration 6 of 10
+2026-05-19 18:47:31,191 - harmonypy - INFO - Iteration 7 of 10
+2026-05-19 18:47:37,943 - harmonypy - INFO - Iteration 8 of 10
+2026-05-19 18:47:42,647 - harmonypy - INFO - Iteration 9 of 10
+2026-05-19 18:47:45,769 - harmonypy - INFO - Iteration 10 of 10
+2026-05-19 18:47:48,613 - harmonypy - INFO - Converged after 10 iterations
+computing neighbors
+    finished: added to `.uns['neighbors']`
+    `.obsp['distances']`, distances for each pair of neighbors
+    `.obsp['connectivities']`, weighted adjacency matrix (0:00:05)
+computing UMAP
+    finished: added
+    'X_umap', UMAP coordinates (adata.obsm)
+    'umap', UMAP parameters (adata.uns) (0:00:17)
+Running Leiden clustering at three resolutions...
+running Leiden clustering
+    finished: found 8 clusters and added
+    'leiden_res_0.25', the cluster labels (adata.obs, categorical) (0:00:00)
+running Leiden clustering
+    finished: found 10 clusters and added
+    'leiden_res_0.50', the cluster labels (adata.obs, categorical) (0:00:00)
+running Leiden clustering
+    finished: found 17 clusters and added
+    'leiden_res_1.00', the cluster labels (adata.obs, categorical) (0:00:00)
+
+Computing Leiden benchmark metrics (silhouette, Davies-Bouldin, ARI vs truth)...
+
+=== Benchmark Metrics ===
+           method  n_clusters  silhouette  davies_bouldin  ari_vs_truth
+Leiden (res=0.25)           8      0.2605          1.4506        0.8682
+Leiden (res=0.50)          10      0.2680          1.5428        0.8778
+Leiden (res=1.00)          17      0.1310          1.9302        0.5584
+Saved figures/leiden_benchmark.png
+
+Running Differential Gene Expression on Leiden res=0.50...
+ranking genes
+    finished: added to `.uns['rank_genes_groups']`
+    'names', sorted np.recarray to be indexed by group ids
+    'scores', sorted np.recarray to be indexed by group ids
+    'logfoldchanges', sorted np.recarray to be indexed by group ids
+    'pvals', sorted np.recarray to be indexed by group ids
+    'pvals_adj', sorted np.recarray to be indexed by group ids (0:00:02)
+Storing dendrogram info using `.uns['dendrogram_leiden_res_0.50']`
+
+--- Top 10 marker genes for Cluster 0 ---
+  gene_symbol            names      scores  logfoldchanges  pvals_adj
+0       DSCAM  ENSG00000171587  105.864227        3.940681        0.0
+1         TNR  ENSG00000116147  103.477264        4.540171        0.0
+2      LRRC4C  ENSG00000148948   98.935944        3.102115        0.0
+3      LHFPL3  ENSG00000187416   98.890526        5.384410        0.0
+4       XYLT1  ENSG00000103489   91.931458        4.049084        0.0
+5     SLC35F1  ENSG00000196376   91.803894        3.978378        0.0
+6       OPCML  ENSG00000183715   91.714508        2.588822        0.0
+7       PDZD2  ENSG00000133401   91.061462        3.797807        0.0
+8      PCDH15  ENSG00000150275   90.308533        2.847066        0.0
+9      MEGF11  ENSG00000157890   86.646347        5.112856        0.0
+
+Generating composition plot...
+Generating comparative UMAPs...
+Generating comparative dotplot...
+
+Running DGE between anterior and posterior regions...
+ranking genes
+    finished: added to `.uns['rank_genes_groups']`
+    'names', sorted np.recarray to be indexed by group ids
+    'scores', sorted np.recarray to be indexed by group ids
+    'logfoldchanges', sorted np.recarray to be indexed by group ids
+    'pvals', sorted np.recarray to be indexed by group ids
+    'pvals_adj', sorted np.recarray to be indexed by group ids (0:00:02)
+WARNING: Dendrogram not added. Dendrogram is added only when the number of categories to plot > 2
+
+Leiden pipeline complete.

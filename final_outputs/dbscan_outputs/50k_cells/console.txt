@@ -1,0 +1,71 @@
+/home/oubayy/PycharmProjects/CompBiology/venv/bin/python /home/oubayy/PycharmProjects/CompBiology/pipeline.py
+Reading data from 'data.h5ad'...	Done
+Annotating gene populations...
+	Mitochondrial genes
+	Ribosomal genes
+	Hemoglobin genes
+Calculating QC metrics
+Filtering cells
+Doublet detection
+Normalizing to median total counts
+Logarithmize the data
+Identifying HVGs (highly variable genes)
+/home/oubayy/PycharmProjects/CompBiology/venv/lib/python3.10/site-packages/legacy_api_wrap/__init__.py:88: UserWarning: `flavor='seurat_v3'` expects raw count data, but non-integers were found.
+  return fn(*args_all, **kw)
+Batch Effect Correction
+	Dimensionality reduction
+2026-05-19 19:13:25,023 - harmonypy - INFO - Computing initial centroids with sklearn.KMeans...
+2026-05-19 19:13:32,283 - harmonypy - INFO - sklearn.KMeans initialization complete.
+2026-05-19 19:13:32,636 - harmonypy - INFO - Iteration 1 of 10
+2026-05-19 19:13:45,716 - harmonypy - INFO - Iteration 2 of 10
+2026-05-19 19:13:59,031 - harmonypy - INFO - Iteration 3 of 10
+2026-05-19 19:14:12,791 - harmonypy - INFO - Iteration 4 of 10
+2026-05-19 19:14:25,727 - harmonypy - INFO - Iteration 5 of 10
+2026-05-19 19:14:32,927 - harmonypy - INFO - Iteration 6 of 10
+2026-05-19 19:14:37,732 - harmonypy - INFO - Iteration 7 of 10
+2026-05-19 19:14:42,078 - harmonypy - INFO - Iteration 8 of 10
+2026-05-19 19:14:46,311 - harmonypy - INFO - Iteration 9 of 10
+2026-05-19 19:14:50,566 - harmonypy - INFO - Iteration 10 of 10
+	Constructing neighbourhood graph using Harmony-corrected PCA embeddings
+2026-05-19 19:14:54,782 - harmonypy - INFO - Stopped before convergence
+Running HDBSCAN clustering...
+	Running HDBSCAN (min_cluster_size=50, min_samples=10)...
+	  -> 6 clusters found, 25433 noise points (51.1%)
+	Running HDBSCAN (min_cluster_size=100, min_samples=10)...
+	  -> 6 clusters found, 25433 noise points (51.1%)
+	Running HDBSCAN (min_cluster_size=200, min_samples=10)...
+	  -> 6 clusters found, 25433 noise points (51.1%)
+Computing quantitative benchmark metrics...
+/home/oubayy/PycharmProjects/CompBiology/pipeline.py:154: FutureWarning: In the future, the default backend for leiden will be igraph instead of leidenalg.
+
+ To achieve the future defaults please pass: flavor="igraph" and n_iterations=2.  directed must also be False to work with igraph's implementation.
+  sc.tl.leiden(adata_clean, resolution=res, key_added=f"leiden_res_{res}")
+
+Metric                            HDBSCAN   Leiden 0.5
+------------------------------------------------------
+Silhouette Score                   0.4321       0.3532  (higher = better)
+Davies-Bouldin Score               0.9154       1.1558  (lower = better)
+
+Leiden Resolution    # Leiden     # HDBSCAN     ARI vs Leiden  ARI vs Truth
+-------------------------------------------------------------------------
+0.5                  14           6                    0.8658        0.8851
+Running Differential Gene Expression to find marker genes...
+
+--- Top 10 marker genes for Cluster 0 ---
+             names     scores  logfoldchanges  pvals  pvals_adj
+0  ENSG00000120594  55.859093        1.851425    0.0        0.0
+1  ENSG00000168675  55.108345        2.441575    0.0        0.0
+2  ENSG00000148655  55.035786        3.630355    0.0        0.0
+3  ENSG00000096060  54.749683        2.368370    0.0        0.0
+4  ENSG00000151474  54.261395        1.821156    0.0        0.0
+5  ENSG00000147408  52.491673        3.103331    0.0        0.0
+6  ENSG00000266028  52.423576        3.250348    0.0        0.0
+7  ENSG00000184005  51.256145        1.943295    0.0        0.0
+8  ENSG00000079215  50.974415        2.361954    0.0        0.0
+9  ENSG00000073849  50.536385        4.292055    0.0        0.0
+Generating composition plot...
+Generating comparative UMAPs...
+Generating comparative dotplot...
+Running DGE between anterior and posterior regions...
+
+Process finished with exit code 0
