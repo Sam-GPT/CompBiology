@@ -1,7 +1,6 @@
 import scanpy as sc
 import pandas as pd
 import matplotlib.pyplot as plt
-import scanpy.external as sce
 import harmonypy as hm
 import hdbscan
 import numpy as np
@@ -24,11 +23,11 @@ adata = adata[:50000, :].copy()
 
 # Annotate gene populations
 print("Annotating gene populations...")
-adata.var["mt"] = adata.var["feature_name"].str.upper().str.startswith("MT-")
+adata.var["mt"]   = adata.var["feature_name"].str.upper().str.startswith("MT-")
 print("\tMitochondrial genes")
 adata.var["ribo"] = adata.var["feature_name"].str.upper().str.startswith(("RPS", "RPL"))
 print("\tRibosomal genes")
-adata.var["hb"] = adata.var["feature_name"].str.upper().str.contains("^HB[^(P)]")
+adata.var["hb"]   = adata.var["feature_name"].str.upper().str.contains("^HB[^(P)]")
 print("\tHemoglobin genes")
 
 # Calculate QC metrics
@@ -43,7 +42,6 @@ sc.pp.filter_genes(adata, min_cells=3)
 # Doublet Detection
 print("Doublet detection")
 sc.pp.scrublet(adata, batch_key="batch")
-
 adata = adata[adata.obs["doublet_score"] < 0.56].copy()
 
 # Normalization and Feature Selection
@@ -74,7 +72,6 @@ print("\tDimensionality reduction")
 sc.tl.pca(adata, svd_solver="arpack")
 
 Z = adata.obsm["X_pca"]
-
 ho = hm.run_harmony(Z, adata.obs, vars_use=["batch"])
 adata.obsm["X_pca_harmony"] = ho.Z_corr.T
 
@@ -115,7 +112,7 @@ for params in HDBSCAN_PARAMS:
 
     n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
     n_noise    = (labels == -1).sum()
-    print(f"\t  → {n_clusters} clusters found, {n_noise} noise points "
+    print(f"\t  -> {n_clusters} clusters found, {n_noise} noise points "
           f"({n_noise / len(labels) * 100:.1f}%)")
 
 # Visualize the three parameterisations side by side
@@ -143,32 +140,41 @@ from sklearn.metrics import (
     normalized_mutual_info_score,
 )
 
-# All metrics run on adata_clean (noise excluded)
-embed  = adata_clean.obsm["X_pca_harmony"][:, :20]
-labels = adata_clean.obs[chosen_cluster_key].astype("category").cat.codes.values
+embed          = adata_clean.obsm["X_pca_harmony"][:, :20]
+hdbscan_labels = adata_clean.obs[chosen_cluster_key].astype("category").cat.codes.values
+hdbscan_str    = adata_clean.obs[chosen_cluster_key].astype(str)
 
-# Silhouette and Davies-Bouldin: subsample to 5000 cells max for speed
-sample_size = min(5000, len(labels))
-sil = silhouette_score(embed, labels, sample_size=sample_size, random_state=42)
-db  = davies_bouldin_score(embed, labels)
+# Silhouette and Davies-Bouldin for HDBSCAN, subsample to 5000 cells max for speed
+sample_size = min(5000, len(hdbscan_labels))
+sil_hdbscan = silhouette_score(embed, hdbscan_labels, sample_size=sample_size, random_state=42)
+db_hdbscan  = davies_bouldin_score(embed, hdbscan_labels)
 
-# ARI and NMI vs Leiden: run Leiden on adata_clean at three resolutions
+# Run Leiden on adata_clean at three resolutions for ARI comparison
 for res in [0.25, 0.5, 1.0]:
     sc.tl.leiden(adata_clean, resolution=res, key_added=f"leiden_res_{res}")
 
-print(f"\n{'Metric':<30} {'Value':>10}")
-print("-" * 42)
-print(f"{'Silhouette Score':<30} {sil:>10.4f}  (higher = better, range [-1,1])")
-print(f"{'Davies-Bouldin Score':<30} {db:>10.4f}  (lower = better, range [0,inf))")
+# Silhouette and Davies-Bouldin for Leiden 0.5 as a reference in the same units
+leiden_ref_codes = adata_clean.obs["leiden_res_0.5"].astype("category").cat.codes.values
+sil_leiden = silhouette_score(embed, leiden_ref_codes, sample_size=sample_size, random_state=42)
+db_leiden  = davies_bouldin_score(embed, leiden_ref_codes)
 
-print(f"\n{'Leiden Resolution':<20} {'# Leiden':<12} {'# HDBSCAN':<12} {'ARI vs Leiden':>8} {'NMI vs Ground Truth':>8}")
-print("-" * 62)
+# Ground-truth labels must come from adata_clean (not adata) — cell counts must
+# match after noise exclusion or adjusted_rand_score raises a shape mismatch.
+truth_labels = adata_clean.obs["cell_type"].astype(str)
+
+print(f"\n{'Metric':<30} {'HDBSCAN':>10} {'Leiden 0.5':>12}")
+print("-" * 54)
+print(f"{'Silhouette Score':<30} {sil_hdbscan:>10.4f} {sil_leiden:>12.4f}  (higher = better)")
+print(f"{'Davies-Bouldin Score':<30} {db_hdbscan:>10.4f} {db_leiden:>12.4f}  (lower = better)")
+
+print(f"\n{'Leiden Resolution':<20} {'# Leiden':<12} {'# HDBSCAN':<12} {'ARI vs Leiden':>14} {'NMI vs Truth':>13}")
+print("-" * 73)
 for res in [0.25, 0.5, 1.0]:
     leiden_labels = adata_clean.obs[f"leiden_res_{res}"].astype(str)
-    truth_ref = adata.obs["cell_type"].astype(str).astype("category").cat.codes.values
-    ari_vs_leiden = adjusted_rand_score(leiden_labels, adata_clean.obs[chosen_cluster_key].astype(str))
-    ari_vs_truth = adjusted_rand_score(leiden_labels, adata_clean.obs[chosen_cluster_key].astype(str))
-    print(f"{res:<20} {leiden_labels.nunique():<12} {adata_clean.obs[chosen_cluster_key].nunique():<12} {ari_vs_leiden:>8.4f} {ari_vs_truth:>8.4f}")
+    ari_vs_leiden = adjusted_rand_score(leiden_labels, hdbscan_str)
+    nmi_vs_truth  = normalized_mutual_info_score(truth_labels, hdbscan_str)
+    print(f"{res:<20} {leiden_labels.nunique():<12} {hdbscan_str.nunique():<12} "
+          f"{ari_vs_leiden:>14.4f} {nmi_vs_truth:>13.4f}")
 
 
 ## 5. Cluster Interpretation
