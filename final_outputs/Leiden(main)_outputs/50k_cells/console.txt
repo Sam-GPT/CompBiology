@@ -1,3 +1,4 @@
+(.venv) yilmaz@yilmaz-Victus-by-HP-Gaming-Laptop-16-r0xxx:~/Desktop/bio/CompBiology$ python3 pipeline.py
 [load_data] Reading 703771a1-236f-4eda-9c04-318d882e149b.h5ad ...
 [load_data]   Full shape: 129905 cells x 17131 genes
 [load_data]   Replaced .X with raw integer counts from .raw.X
@@ -98,7 +99,7 @@ Estimated detectable doublet fraction = 3.6%
 Overall doublet rate:
         Expected   = 5.0%
         Estimated  = 0.6%
-    Scrublet finished (0:03:32)
+    Scrublet finished (0:03:35)
 normalizing counts per cell
     finished (0:00:00)
 extracting highly variable genes
@@ -111,19 +112,17 @@ extracting highly variable genes
 computing PCA
     with n_comps=50
     finished (0:00:02)
-2026-05-19 18:46:49,262 - harmonypy - INFO - Computing initial centroids with sklearn.KMeans...
-2026-05-19 18:46:53,114 - harmonypy - INFO - sklearn.KMeans initialization complete.
-2026-05-19 18:46:53,254 - harmonypy - INFO - Iteration 1 of 10
-2026-05-19 18:47:00,045 - harmonypy - INFO - Iteration 2 of 10
-2026-05-19 18:47:06,852 - harmonypy - INFO - Iteration 3 of 10
-2026-05-19 18:47:13,622 - harmonypy - INFO - Iteration 4 of 10
-2026-05-19 18:47:20,436 - harmonypy - INFO - Iteration 5 of 10
-2026-05-19 18:47:27,439 - harmonypy - INFO - Iteration 6 of 10
-2026-05-19 18:47:31,191 - harmonypy - INFO - Iteration 7 of 10
-2026-05-19 18:47:37,943 - harmonypy - INFO - Iteration 8 of 10
-2026-05-19 18:47:42,647 - harmonypy - INFO - Iteration 9 of 10
-2026-05-19 18:47:45,769 - harmonypy - INFO - Iteration 10 of 10
-2026-05-19 18:47:48,613 - harmonypy - INFO - Converged after 10 iterations
+2026-05-19 19:56:15,741 - harmonypy - INFO - Computing initial centroids with sklearn.KMeans...
+2026-05-19 19:56:19,587 - harmonypy - INFO - sklearn.KMeans initialization complete.
+2026-05-19 19:56:19,726 - harmonypy - INFO - Iteration 1 of 10
+2026-05-19 19:56:26,472 - harmonypy - INFO - Iteration 2 of 10
+2026-05-19 19:56:33,243 - harmonypy - INFO - Iteration 3 of 10
+2026-05-19 19:56:40,052 - harmonypy - INFO - Iteration 4 of 10
+2026-05-19 19:56:46,837 - harmonypy - INFO - Iteration 5 of 10
+2026-05-19 19:56:53,685 - harmonypy - INFO - Iteration 6 of 10
+2026-05-19 19:56:57,459 - harmonypy - INFO - Iteration 7 of 10
+2026-05-19 19:57:04,273 - harmonypy - INFO - Iteration 8 of 10
+2026-05-19 19:57:08,470 - harmonypy - INFO - Converged after 8 iterations
 computing neighbors
     finished: added to `.uns['neighbors']`
     `.obsp['distances']`, distances for each pair of neighbors
@@ -131,25 +130,25 @@ computing neighbors
 computing UMAP
     finished: added
     'X_umap', UMAP coordinates (adata.obsm)
-    'umap', UMAP parameters (adata.uns) (0:00:17)
+    'umap', UMAP parameters (adata.uns) (0:00:18)
 Running Leiden clustering at three resolutions...
 running Leiden clustering
-    finished: found 8 clusters and added
+    finished: found 9 clusters and added
     'leiden_res_0.25', the cluster labels (adata.obs, categorical) (0:00:00)
 running Leiden clustering
-    finished: found 10 clusters and added
+    finished: found 11 clusters and added
     'leiden_res_0.50', the cluster labels (adata.obs, categorical) (0:00:00)
 running Leiden clustering
-    finished: found 17 clusters and added
+    finished: found 16 clusters and added
     'leiden_res_1.00', the cluster labels (adata.obs, categorical) (0:00:00)
 
 Computing Leiden benchmark metrics (silhouette, Davies-Bouldin, ARI vs truth)...
 
 === Benchmark Metrics ===
            method  n_clusters  silhouette  davies_bouldin  ari_vs_truth
-Leiden (res=0.25)           8      0.2605          1.4506        0.8682
-Leiden (res=0.50)          10      0.2680          1.5428        0.8778
-Leiden (res=1.00)          17      0.1310          1.9302        0.5584
+Leiden (res=0.25)           9      0.2633          1.4474        0.8742
+Leiden (res=0.50)          11      0.1739          1.9030        0.6927
+Leiden (res=1.00)          16      0.1455          1.8247        0.5767
 Saved figures/leiden_benchmark.png
 
 Running Differential Gene Expression on Leiden res=0.50...
@@ -164,16 +163,16 @@ Storing dendrogram info using `.uns['dendrogram_leiden_res_0.50']`
 
 --- Top 10 marker genes for Cluster 0 ---
   gene_symbol            names      scores  logfoldchanges  pvals_adj
-0       DSCAM  ENSG00000171587  105.864227        3.940681        0.0
-1         TNR  ENSG00000116147  103.477264        4.540171        0.0
-2      LRRC4C  ENSG00000148948   98.935944        3.102115        0.0
-3      LHFPL3  ENSG00000187416   98.890526        5.384410        0.0
-4       XYLT1  ENSG00000103489   91.931458        4.049084        0.0
-5     SLC35F1  ENSG00000196376   91.803894        3.978378        0.0
-6       OPCML  ENSG00000183715   91.714508        2.588822        0.0
-7       PDZD2  ENSG00000133401   91.061462        3.797807        0.0
-8      PCDH15  ENSG00000150275   90.308533        2.847066        0.0
-9      MEGF11  ENSG00000157890   86.646347        5.112856        0.0
+0       DSCAM  ENSG00000171587  105.861000        3.942719        0.0
+1         TNR  ENSG00000116147  103.498978        4.542367        0.0
+2      LHFPL3  ENSG00000187416   98.893883        5.384462        0.0
+3      LRRC4C  ENSG00000148948   98.884346        3.102497        0.0
+4       XYLT1  ENSG00000103489   92.030373        4.052557        0.0
+5     SLC35F1  ENSG00000196376   91.824310        3.980138        0.0
+6       OPCML  ENSG00000183715   91.723106        2.590207        0.0
+7       PDZD2  ENSG00000133401   91.185379        3.802467        0.0
+8      PCDH15  ENSG00000150275   90.246590        2.847104        0.0
+9      MEGF11  ENSG00000157890   86.696335        5.115315        0.0
 
 Generating composition plot...
 Generating comparative UMAPs...
