@@ -167,14 +167,14 @@ print("-" * 54)
 print(f"{'Silhouette Score':<30} {sil_hdbscan:>10.4f} {sil_leiden:>12.4f}  (higher = better)")
 print(f"{'Davies-Bouldin Score':<30} {db_hdbscan:>10.4f} {db_leiden:>12.4f}  (lower = better)")
 
-print(f"\n{'Leiden Resolution':<20} {'# Leiden':<12} {'# HDBSCAN':<12} {'ARI vs Leiden':>14} {'NMI vs Truth':>13}")
+print(f"\n{'Leiden Resolution':<20} {'# Leiden':<12} {'# HDBSCAN':<12} {'ARI vs Leiden':>14} {'ARI vs Truth':>13}")
 print("-" * 73)
-for res in [0.25, 0.5, 1.0]:
+for res in [0.5]:
     leiden_labels = adata_clean.obs[f"leiden_res_{res}"].astype(str)
     ari_vs_leiden = adjusted_rand_score(leiden_labels, hdbscan_str)
-    nmi_vs_truth  = normalized_mutual_info_score(truth_labels, hdbscan_str)
+    ari_vs_truth = adjusted_rand_score(truth_labels, hdbscan_str)
     print(f"{res:<20} {leiden_labels.nunique():<12} {hdbscan_str.nunique():<12} "
-          f"{ari_vs_leiden:>14.4f} {nmi_vs_truth:>13.4f}")
+          f"{ari_vs_leiden:>14.4f} {ari_vs_truth:>13.4f}")
 
 
 ## 5. Cluster Interpretation
