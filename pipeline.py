@@ -68,7 +68,7 @@ sc.pp.scrublet(adata, batch_key="batch") # doublet: which are multiple cells cap
 # Visualize doublet scores and predicted doublets
 # sc.pl.umap(adata, color=["doublet_score", "predicted_doublet"])
 
-adata = adata[adata.obs["doublet_score"] < 0.56].copy()
+adata = adata[~adata.obs["predicted_doublet"]].copy()
 
 # Normalization and Feature Selection
 
