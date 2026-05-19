@@ -27,7 +27,7 @@ adata.X = adata.raw.X.copy()
 adata.raw = None
 
 # Limit to 30K cells
-adata = adata[:30000, :].copy()
+adata = adata[:10000, :].copy()
 
 
 ## 1. Normalize / Preprocess
@@ -233,8 +233,11 @@ import scipy.sparse
 # ================================================================================
 print("\nRunning K-Means for algorithm benchmark...")
 
-# We force K-Means to find 9 clusters (since Leiden res=0.50 found 9 clusters)
-kmeans = KMeans(n_clusters=9, random_state=42)
+# Match K-Means' cluster count to Leiden's so the ARI comparison is apples-to-apples.
+# Hardcoding n_clusters drifts out of sync whenever the upstream pipeline changes.
+n_kmeans = adata.obs["leiden_res_0.50"].nunique()
+print(f"Running K-Means with n_clusters={n_kmeans} (matched to Leiden res=0.50)")
+kmeans = KMeans(n_clusters=n_kmeans, random_state=42)
 kmeans.fit(adata.obsm['X_pca_harmony'])
 
 # Save the K-Means results in the adata object
