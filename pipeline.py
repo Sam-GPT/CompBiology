@@ -42,7 +42,7 @@ sc.pp.filter_genes(adata, min_cells=3)
 # Doublet Detection
 print("Doublet detection")
 sc.pp.scrublet(adata, batch_key="batch")
-adata = adata[adata.obs["doublet_score"] < 0.56].copy()
+adata = adata[~adata.obs["predicted_doublet"]].copy()
 
 # Normalization and Feature Selection
 adata.layers["counts"] = adata.X.copy()
@@ -158,8 +158,9 @@ leiden_ref_codes = adata_clean.obs["leiden_res_0.5"].astype("category").cat.code
 sil_leiden = silhouette_score(embed, leiden_ref_codes, sample_size=sample_size, random_state=42)
 db_leiden  = davies_bouldin_score(embed, leiden_ref_codes)
 
-# Ground-truth labels must come from adata_clean (not adata) — cell counts must
-# match after noise exclusion or adjusted_rand_score raises a shape mismatch.
+# Ground-truth labels must come from adata_clean (not adata)
+# cell counts must match after noise exclusion
+#  or adjusted_rand_score raises a shape mismatch.
 truth_labels = adata_clean.obs["cell_type"].astype(str)
 
 print(f"\n{'Metric':<30} {'HDBSCAN':>10} {'Leiden 0.5':>12}")
