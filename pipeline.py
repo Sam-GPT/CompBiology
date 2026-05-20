@@ -27,7 +27,6 @@ sc.settings._root_logger.addFilter(_DropSaveFigMsg())
 # Read in the data
 # ─────────────────────────────────────────────────────────────────────────────
 # Full CellxGene h5ad has 130k cells × 17k genes; we subsample to 50k for runtime.
-# feature_name (gene symbols) and group/batch obs columns are already present.
 adata = load_h5ad_data('703771a1-236f-4eda-9c04-318d882e149b.h5ad', n_cells=50000)
 
 
@@ -56,7 +55,6 @@ sc.pp.filter_cells(adata, min_genes=200)
 sc.pp.filter_genes(adata, min_cells=3)
 
 # Doublet Detection
-# Now that we load raw counts from the h5ad's .raw layer, Scrublet works correctly.
 sc.pp.scrublet(adata, batch_key="batch")
 adata = adata[~adata.obs["predicted_doublet"]].copy()
 
@@ -131,7 +129,7 @@ sc.pl.umap(
     save="_umap_batch.png",
 )
 
-# UMAP coloured by cell type, sanity check using ground-truth labels
+# UMAP coloured by cell type
 sc.pl.umap(
     adata,
     color="cell_type",
