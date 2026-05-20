@@ -43,12 +43,12 @@ sc.pp.calculate_qc_metrics(adata, qc_vars=["mt", "ribo", "hb"], inplace=True, lo
 # n_genes_by_counts: Number of genes detected in a cell
 # total_counts: Total number of molecules (UMIs) in a cell
 # pct_counts_mt: Percentage of mitochondrial genes in a cell
-# sc.pl.violin(
-#     adata,
-#     ["n_genes_by_counts", "total_counts", "pct_counts_mt"],
-#     jitter=0.4,
-#     multi_panel=True,
-# )
+sc.pl.violin(
+    adata,
+    ["n_genes_by_counts", "total_counts", "pct_counts_mt"],
+    jitter=0.4,
+    multi_panel=True,
+)
 
 # Filter cells
 sc.pp.filter_cells(adata, min_genes=200) # Keeps only cells that express at least 200 genes
@@ -59,7 +59,7 @@ sc.pp.filter_genes(adata, min_cells=3) # Keeps only genes that are expressed in 
 sc.pp.scrublet(adata, batch_key="batch") # doublet: which are multiple cells captured in one droplet.
 
 # Visualize doublet scores and predicted doublets 
-# sc.pl.umap(adata, color=["doublet_score", "predicted_doublet"])
+sc.pl.umap(adata, color=["doublet_score", "predicted_doublet"])
 
 adata = adata[adata.obs["doublet_score"] < 0.56].copy()
 
@@ -83,7 +83,6 @@ sc.pp.highly_variable_genes(
     layer="counts",
 )
 
-# ADD THIS LINE: Save the normalized/log-transformed data including all genes
 adata.raw = adata
 
 # Subsetting to highly variable genes
@@ -98,11 +97,11 @@ sc.tl.pca(adata, svd_solver="arpack")
 
 
 # Visualizes how much variance the first 50 PCA dimensions explain (on a log scale)
-# sc.pl.pca_variance_ratio(adata, n_pcs=50, log=True)
+sc.pl.pca_variance_ratio(adata, n_pcs=50, log=True)
 
 
 
-Z = adata.obsm["X_pca"]   # (9769, 50)
+Z = adata.obsm["X_pca"]   
 
 # run harmony directly
 ho = hm.run_harmony(
@@ -116,33 +115,32 @@ adata.obsm["X_pca_harmony"] = ho.Z_corr.T
 
 
 # # Before Harmony Batch correction (Plotting the PCA colored by batch to see the batch effect)
-# sc.pl.pca(adata, color="batch")
+sc.pl.pca(adata, color="batch")
 
 # # After Harmony Batch correction (Plotting the Harmony-corrected PCA colored by batch to see if the batch effect is reduced)
-# sc.pl.embedding(
-#     adata,
-#     basis="X_pca_harmony",
-#     color="batch"
-# )
+sc.pl.embedding(
+    adata,
+    basis="X_pca_harmony",
+    color="batch"
+)
 
 # Constructing the neighborhood graph using the Harmony-corrected PCA embeddings
 sc.pp.neighbors(adata, use_rep="X_pca_harmony")
 sc.tl.umap(adata)
 
 # Visualize the UMAP colored by batch to check if the batch effect has been mitigated
-# sc.pl.umap(
-#     adata,
-#     color="batch",
-#     # Setting a smaller point size to get prevent overlap
-#     size=2,
-# )
+sc.pl.umap(
+    adata,
+    color="batch",
+    size=2,
+)
 
 
 
 
+### The below code is for saving the preprocessed data in a format which is then used by scDFC in a seperate script.  
 
 # adata.to_df().T.to_csv("data/MyDataset/data.tsv", sep="\t")
-
 # adata.obs["cell_type"].to_csv(
 #     "data/MyDataset/label.ann",
 #     sep="\t",
@@ -151,25 +149,26 @@ sc.tl.umap(adata)
 
 
 
-print("Done")
 
 
 ## 3. Clustering
 print("Running clustering...")
 
 # Method: Leiden algorithm (The modern standard)
-# We test multiple resolutions to benchmark how it affects the number of clusters (as seen on slide 35)
+# We test multiple resolutions to benchmark how it affects the number of clusters 
 
 sc.tl.leiden(adata, resolution=0.25, key_added="leiden_res_0.25")
 sc.tl.leiden(adata, resolution=0.5, key_added="leiden_res_0.50")
 sc.tl.leiden(adata, resolution=1.0, key_added="leiden_res_1.00")
 
-# Visualize the clustering results side-by-side on the UMAP for your benchmark report
+# Visualize the clustering results side-by-side on the UMAP 
 sc.pl.umap(
     adata,
     color=["leiden_res_0.25", "leiden_res_0.50", "leiden_res_1.00"],
     wspace=0.4,
-    title=["Leiden (Res=0.25)", "Leiden (Res=0.50)", "Leiden (Res=1.0)"]
+    title=["Leiden (Res=0.25)", "Leiden (Res=0.50)", "Leiden (Res=1.0)"],
+    save="_leiden_resolutions.png",
+    show=False
 )
 
 
@@ -182,13 +181,12 @@ adata.obs['scDFC_cluster'] = predicted_labels['label'].astype(str).values
 
 
 
-# Markers we saw in your earlier successful plot:
 confirmed_markers = ['CTNNA3', 'PITPNC1', 'TNR', 'RBFOX3', 'PLXNA4', 'LRMDA']
 
-# Filter just in case
+# Filter 
 to_plot = [g for g in confirmed_markers if g in adata.var['feature_name'].values]
 
-# sc.pl.umap(adata, color=to_plot, gene_symbols='feature_name', ncols=3)
+sc.pl.umap(adata, color=to_plot, gene_symbols='feature_name', ncols=3)
 
 
 
@@ -217,7 +215,9 @@ sc.pl.rank_genes_groups_dotplot(
     groupby=chosen_cluster_key,
     standard_scale="var", 
     gene_symbols="feature_name",  
-    title="Top 5 Marker Genes per Cluster"
+    title="Top 5 Marker Genes per Cluster",
+    save="_top_5_marker_genes.png",
+    show=False
 )
 
 cluster_0_markers = sc.get.rank_genes_groups_df(adata, group="0")
@@ -239,9 +239,8 @@ sc.tl.rank_genes_groups(
 )
 
 
-# sc.pl.rank_genes_groups(adata)
-# Use 'feature_name' to tell Scanpy where the readable symbols are
-# sc.pl.rank_genes_groups(adata, n_genes=20, gene_symbols='feature_name', sharey=False)
+sc.pl.rank_genes_groups(adata)
+sc.pl.rank_genes_groups(adata, n_genes=20, gene_symbols='feature_name', sharey=False)
 
 # 1. Cell Type Composition by Region
 print("Generating composition plot...")
@@ -258,7 +257,7 @@ plt.tight_layout()
 
 os.makedirs("figures", exist_ok=True)
 plt.savefig("figures/composition_bar.png", dpi=300, bbox_inches='tight')
-plt.close() # Closes the plot so it doesn't wait for your input
+plt.close() 
 
 # 2. UMAP separated by Region
 print("Generating comparative UMAPs...")
