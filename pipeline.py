@@ -21,8 +21,6 @@ sc.settings.figdir = "output"
 # Read in the data
 adata = sc.read_h5ad('data.h5ad')
 
-# CellxGene stores log-normalized values in .X and raw integer counts in .raw.X.
-# Swap so the pipeline's normalize_total + log1p + seurat_v3 HVG step works on raw counts.
 adata.X = adata.raw.X.copy()
 adata.raw = None
 
@@ -50,12 +48,12 @@ sc.pp.calculate_qc_metrics(adata, qc_vars=["mt", "ribo", "hb"], inplace=True, lo
 # n_genes_by_counts: Number of genes detected in a cell
 # total_counts: Total number of molecules (UMIs) in a cell
 # pct_counts_mt: Percentage of mitochondrial genes in a cell
-# sc.pl.violin(
-#     adata,
-#     ["n_genes_by_counts", "total_counts", "pct_counts_mt"],
-#     jitter=0.4,
-#     multi_panel=True,
-# )
+sc.pl.violin(
+    adata,
+    ["n_genes_by_counts", "total_counts", "pct_counts_mt"],
+    jitter=0.4,
+    multi_panel=True,
+)
 
 # Filter cells
 sc.pp.filter_cells(adata, min_genes=200) # Keeps only cells that express at least 200 genes
@@ -66,7 +64,7 @@ sc.pp.filter_genes(adata, min_cells=3) # Keeps only genes that are expressed in 
 sc.pp.scrublet(adata, batch_key="batch") # doublet: which are multiple cells captured in one droplet.
 
 # Visualize doublet scores and predicted doublets
-# sc.pl.umap(adata, color=["doublet_score", "predicted_doublet"])
+sc.pl.umap(adata, color=["doublet_score", "predicted_doublet"])
 
 adata = adata[~adata.obs["predicted_doublet"]].copy()
 
@@ -101,11 +99,11 @@ sc.tl.pca(adata, svd_solver="arpack")
 
 
 # Visualizes how much variance the first 50 PCA dimensions explain (on a log scale)
-# sc.pl.pca_variance_ratio(adata, n_pcs=50, log=True)
+sc.pl.pca_variance_ratio(adata, n_pcs=50, log=True)
 
 
 
-Z = adata.obsm["X_pca"]   # (9769, 50)
+Z = adata.obsm["X_pca"]  
 
 # run harmony directly
 ho = hm.run_harmony(
@@ -119,26 +117,25 @@ adata.obsm["X_pca_harmony"] = ho.Z_corr.T
 
 
 # # Before Harmony Batch correction (Plotting the PCA colored by batch to see the batch effect)
-# sc.pl.pca(adata, color="batch")
+sc.pl.pca(adata, color="batch")
 
 # # After Harmony Batch correction (Plotting the Harmony-corrected PCA colored by batch to see if the batch effect is reduced)
-# sc.pl.embedding(
-#     adata,
-#     basis="X_pca_harmony",
-#     color="batch"
-# )
+sc.pl.embedding(
+    adata,
+    basis="X_pca_harmony",
+    color="batch"
+)
 
 # Constructing the neighborhood graph using the Harmony-corrected PCA embeddings
 sc.pp.neighbors(adata, use_rep="X_pca_harmony")
 sc.tl.umap(adata)
 
 # Visualize the UMAP colored by batch to check if the batch effect has been mitigated
-# sc.pl.umap(
-#     adata,
-#     color="batch",
-#     # Setting a smaller point size to get prevent overlap
-#     size=2,
-# )
+sc.pl.umap(
+    adata,
+    color="batch",
+    size=2,
+)
 
 
 
@@ -155,13 +152,13 @@ sc.tl.umap(adata)
 print("Running clustering...")
 
 # Method: Leiden algorithm (The modern standard)
-# We test multiple resolutions to benchmark how it affects the number of clusters (as seen on slide 35)
+# We test multiple resolutions to benchmark how it affects the number of clusters 
 
 sc.tl.leiden(adata, resolution=0.25, key_added="leiden_res_0.25", flavor="igraph", directed=False, n_iterations=2)
 sc.tl.leiden(adata, resolution=0.5,  key_added="leiden_res_0.50", flavor="igraph", directed=False, n_iterations=2)
 sc.tl.leiden(adata, resolution=1.0,  key_added="leiden_res_1.00", flavor="igraph", directed=False, n_iterations=2)
 
-# Visualize the clustering results side-by-side on the UMAP for your benchmark report
+# Visualize the clustering results side-by-side on the UMAP 
 sc.pl.umap(
     adata,
     color=["leiden_res_0.25", "leiden_res_0.50", "leiden_res_1.00"],
@@ -200,8 +197,6 @@ sc.tl.rank_genes_groups(
 sc.tl.dendrogram(adata, groupby=chosen_cluster_key, use_rep="X_pca_harmony")
 
 # 4a. Visualize the top 5 marker genes for each cluster using a Dotplot
-# Dotplots are excellent for interpreting clusters (as shown on slide 36)
-# It shows both the mean expression (color) and fraction of cells expressing the gene (dot size)
 sc.pl.rank_genes_groups_dotplot(
     adata,
     n_genes=5,
@@ -212,15 +207,11 @@ sc.pl.rank_genes_groups_dotplot(
 )
 
 # 4b. Extract the marker genes into a DataFrame to investigate biologically
-# Let's say you want to look at the top markers for Cluster '0'
 cluster_0_markers = sc.get.rank_genes_groups_df(adata, group="0")
 
 print("\n--- Top 10 marker genes for Cluster 0 ---")
 print(cluster_0_markers.head(10))
 
-# Note for your assignment report:
-# Once you have these gene lists, you would typically look them up in biological databases
-# (like CellMarker or literature) to say "Cluster 0 is highly expressing CD14, so it is a Monocyte."
 
 
 
@@ -233,8 +224,6 @@ import scipy.sparse
 # ================================================================================
 print("\nRunning K-Means for algorithm benchmark...")
 
-# Match K-Means' cluster count to Leiden's so the ARI comparison is apples-to-apples.
-# Hardcoding n_clusters drifts out of sync whenever the upstream pipeline changes.
 n_kmeans = adata.obs["leiden_res_0.50"].nunique()
 print(f"Running K-Means with n_clusters={n_kmeans} (matched to Leiden res=0.50)")
 kmeans = KMeans(n_clusters=n_kmeans, random_state=42)
@@ -258,9 +247,6 @@ sc.pl.umap(
 )
 
 ## 6. Differential Gene Expression on K-Means clusters
-# Wilcoxon DGE so K-Means gets its own marker-gene interpretation
-# (Section 4 above already produces this for Leiden).
-
 print("\nRunning DGE on K-Means clusters...")
 sc.tl.rank_genes_groups(adata, groupby="kmeans", method="wilcoxon", use_raw=False)
 sc.tl.dendrogram(adata, groupby="kmeans", use_rep="X_pca_harmony")
